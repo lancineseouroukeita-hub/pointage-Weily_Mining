@@ -128,11 +128,22 @@
       <div class="panelCard">
         <div class="tableWrap">
           <table>
-            <thead><tr><th>Date</th><th>Matricule</th><th>Nom</th><th>Département</th><th>Section</th><th>Arrivée</th><th>Début pause</th><th>Fin pause</th><th>Départ</th></tr></thead>
+            <thead><tr><th>Date</th><th>Matricule</th><th>Nom</th><th>Département</th><th>Section</th><th>Arrivée</th><th>Début pause</th><th>Fin pause</th><th>Départ</th><th>Heures travaillées</th><th>Heures sup (jour)</th></tr></thead>
             <tbody id="entriesTbody"></tbody>
           </table>
         </div>
         <div class="empty" id="entriesEmpty" style="display:none;">Aucun pointage pour cette période.</div>
+      </div>
+      <div class="panelCard">
+        <h2>Récapitulatif hebdomadaire</h2>
+        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Heures sup au-delà de 40h/semaine (semaine complète lundi→dimanche, même si le filtre ci-dessus ne couvre qu'une partie de la semaine).</p>
+        <div class="tableWrap">
+          <table>
+            <thead><tr><th>Semaine du</th><th>Matricule</th><th>Nom</th><th>Département</th><th>Total heures</th><th>Heures sup (semaine)</th></tr></thead>
+            <tbody id="weeklyTbody"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="weeklyEmpty" style="display:none;">Aucune semaine complète pour cette période.</div>
       </div>
     </div>
 
@@ -175,6 +186,15 @@
   }
   function fmtDate(iso) {
     return new Date(iso).toLocaleDateString('fr-FR');
+  }
+  // Même format "8h30" que côté serveur (voir workday.js/fmtHours) — le
+  // serveur renvoie des heures décimales (ex: 8.5), pas déjà formatées.
+  function fmtHours(hours) {
+    if (hours === null || hours === undefined) return '—';
+    let h = Math.floor(hours);
+    let m = Math.round((hours - h) * 60);
+    if (m === 60) { h += 1; m = 0; }
+    return h + 'h' + String(m).padStart(2, '0');
   }
   function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -307,6 +327,7 @@
 
   async function loadEntries() {
     const data = await api('/api/report/entries?' + entriesQuery());
+
     const tbody = $('entriesTbody');
     tbody.innerHTML = '';
     $('entriesEmpty').style.display = data.entries.length ? 'none' : 'block';
@@ -316,8 +337,22 @@
         <td>${escapeHtml(e.firstName)} ${escapeHtml(e.lastName)}</td>
         <td>${escapeHtml(e.department)}</td><td>${escapeHtml(e.section)}</td>
         <td>${fmtTime(e.arrivalAt)}</td><td>${fmtTime(e.breakStartAt)}</td>
-        <td>${fmtTime(e.breakEndAt)}</td><td>${fmtTime(e.departureAt)}</td>`;
+        <td>${fmtTime(e.breakEndAt)}</td><td>${fmtTime(e.departureAt)}</td>
+        <td>${fmtHours(e.workedHours)}</td><td>${fmtHours(e.dailyOvertimeHours)}</td>`;
       tbody.appendChild(tr);
+    });
+
+    const weeklyTbody = $('weeklyTbody');
+    weeklyTbody.innerHTML = '';
+    const weekly = data.weeklySummary || [];
+    $('weeklyEmpty').style.display = weekly.length ? 'none' : 'block';
+    weekly.forEach((w) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${fmtDate(w.weekStart)}</td><td>${escapeHtml(w.matricule)}</td>
+        <td>${escapeHtml(w.firstName)} ${escapeHtml(w.lastName)}</td>
+        <td>${escapeHtml(w.department)}</td>
+        <td>${fmtHours(w.totalHours)}</td><td>${fmtHours(w.weeklyOvertimeHours)}</td>`;
+      weeklyTbody.appendChild(tr);
     });
   }
   $('entriesFilterBtn').addEventListener('click', loadEntries);

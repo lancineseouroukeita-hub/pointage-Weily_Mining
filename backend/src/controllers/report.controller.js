@@ -1,6 +1,6 @@
 const ExcelJS = require('exceljs');
 const prisma = require('../config/prisma');
-const { dateOnly } = require('../utils/workday');
+const { dateOnly, workedHours, dailyOvertimeHours, weekStart, weekEnd, fmtHours } = require('../utils/workday');
 
 // Construit la clause "where" commune à la consultation (listEntries) ET à
 // l'export Excel (exportEntries) — évite que les deux finissent par
@@ -32,21 +32,70 @@ async function listEntries(req, res) {
     include: { employee: true },
     orderBy: [{ date: 'desc' }, { employee: { lastName: 'asc' } }],
   });
+  const weeklySummary = await computeWeeklySummary({ from, to, department });
   return res.json({
-    entries: entries.map((e) => ({
-      id: e.id,
-      date: e.date,
-      matricule: e.employee.matricule,
-      firstName: e.employee.firstName,
-      lastName: e.employee.lastName,
-      department: e.employee.department,
-      section: e.employee.section,
-      arrivalAt: e.arrivalAt,
-      breakStartAt: e.breakStartAt,
-      breakEndAt: e.breakEndAt,
-      departureAt: e.departureAt,
-    })),
+    entries: entries.map((e) => {
+      const hours = workedHours(e);
+      return {
+        id: e.id,
+        date: e.date,
+        matricule: e.employee.matricule,
+        firstName: e.employee.firstName,
+        lastName: e.employee.lastName,
+        department: e.employee.department,
+        section: e.employee.section,
+        arrivalAt: e.arrivalAt,
+        breakStartAt: e.breakStartAt,
+        breakEndAt: e.breakEndAt,
+        departureAt: e.departureAt,
+        workedHours: hours,
+        dailyOvertimeHours: dailyOvertimeHours(hours),
+      };
+    }),
+    weeklySummary,
   });
+}
+
+// Regroupe les heures travaillées par employé et par semaine (lundi→
+// dimanche, voir workday.js) pour calculer les heures sup HEBDOMADAIRES
+// (> 40h/semaine, demande de Lancine du 28/08/2026) — distinctes des heures
+// sup quotidiennes calculées dans listEntries/exportEntries (> 8h/jour).
+//
+// Élargit volontairement la période demandée aux semaines complètes qui la
+// recouvrent : sans ça, un filtre "cette semaine" ou "du 1er au 15" pourrait
+// tomber en plein milieu d'une semaine et sous-compter son total, faussant
+// le calcul des heures sup hebdomadaires.
+async function computeWeeklySummary({ from, to, department }) {
+  const extendedFrom = from ? weekStart(from) : undefined;
+  const extendedTo = to ? weekEnd(to) : undefined;
+  const where = buildWhere({ from: extendedFrom, to: extendedTo, department });
+  const entries = await prisma.timeEntry.findMany({ where, include: { employee: true } });
+
+  const byKey = new Map();
+  for (const e of entries) {
+    const hours = workedHours(e);
+    if (hours === null) continue; // journée incomplète (pas de départ pointé) : ne compte pas dans le total
+    const ws = weekStart(e.date);
+    const key = e.employeeId + '|' + ws.toISOString();
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        matricule: e.employee.matricule,
+        firstName: e.employee.firstName,
+        lastName: e.employee.lastName,
+        department: e.employee.department,
+        weekStart: ws,
+        totalHours: 0,
+      });
+    }
+    byKey.get(key).totalHours += hours;
+  }
+
+  return Array.from(byKey.values())
+    .map((w) => ({ ...w, weeklyOvertimeHours: Math.max(0, w.totalHours - 40) }))
+    .sort((a, b) => {
+      if (a.weekStart.getTime() !== b.weekStart.getTime()) return b.weekStart - a.weekStart;
+      return a.lastName.localeCompare(b.lastName);
+    });
 }
 
 function fmtDate(d) {
@@ -71,12 +120,15 @@ async function exportEntries(req, res) {
     include: { employee: true },
     orderBy: [{ date: 'asc' }, { employee: { department: 'asc' } }, { employee: { lastName: 'asc' } }],
   });
+  const weeklySummary = await computeWeeklySummary({ from, to, department });
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Pointage';
   workbook.created = new Date();
-  const sheet = workbook.addWorksheet('Pointage');
 
+  // ---- Feuille 1 : pointages jour par jour, avec heures travaillées et
+  // heures sup DU JOUR (> 8h ce jour-là, voir workday.js) ----
+  const sheet = workbook.addWorksheet('Pointage');
   sheet.columns = [
     { header: 'Date', key: 'date', width: 12 },
     { header: 'Matricule', key: 'matricule', width: 12 },
@@ -88,11 +140,14 @@ async function exportEntries(req, res) {
     { header: 'Début pause', key: 'breakStart', width: 12 },
     { header: 'Fin pause', key: 'breakEnd', width: 12 },
     { header: 'Départ', key: 'departure', width: 10 },
+    { header: 'Heures travaillées', key: 'worked', width: 16 },
+    { header: 'Heures sup (jour, >8h)', key: 'overtimeDay', width: 20 },
   ];
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
 
   entries.forEach((e) => {
+    const hours = workedHours(e);
     sheet.addRow({
       date: fmtDate(e.date),
       matricule: e.employee.matricule,
@@ -104,6 +159,34 @@ async function exportEntries(req, res) {
       breakStart: fmtTime(e.breakStartAt),
       breakEnd: fmtTime(e.breakEndAt),
       departure: fmtTime(e.departureAt),
+      worked: fmtHours(hours),
+      overtimeDay: fmtHours(dailyOvertimeHours(hours)),
+    });
+  });
+
+  // ---- Feuille 2 : total hebdomadaire par employé et heures sup SEMAINE
+  // (> 40h/semaine, voir workday.js/computeWeeklySummary) ----
+  const weekSheet = workbook.addWorksheet('Récap hebdomadaire');
+  weekSheet.columns = [
+    { header: 'Semaine du', key: 'weekStart', width: 14 },
+    { header: 'Matricule', key: 'matricule', width: 12 },
+    { header: 'Nom', key: 'lastName', width: 16 },
+    { header: 'Prénom', key: 'firstName', width: 16 },
+    { header: 'Département', key: 'department', width: 18 },
+    { header: 'Total heures travaillées', key: 'total', width: 20 },
+    { header: 'Heures sup (semaine, >40h)', key: 'overtimeWeek', width: 22 },
+  ];
+  weekSheet.getRow(1).font = { bold: true };
+  weekSheet.views = [{ state: 'frozen', ySplit: 1 }];
+  weeklySummary.forEach((w) => {
+    weekSheet.addRow({
+      weekStart: fmtDate(w.weekStart),
+      matricule: w.matricule,
+      lastName: w.lastName,
+      firstName: w.firstName,
+      department: w.department,
+      total: fmtHours(w.totalHours),
+      overtimeWeek: fmtHours(w.weeklyOvertimeHours),
     });
   });
 
