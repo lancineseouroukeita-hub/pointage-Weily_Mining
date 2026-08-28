@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Pointage</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1f232c; --border:#2a2f3a;
+    --text:#eef0f3; --muted:#8b93a3; --accent:#4c8dff; --success:#2ecc71; --danger:#ff5c5c;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .card{width:100%;max-width:420px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:28px 24px;box-shadow:0 12px 40px rgba(0,0,0,.4);}
+  h1{font-size:20px;margin:0 0 4px;text-align:center;}
+  .subtitle{color:var(--muted);font-size:13px;text-align:center;margin:0 0 22px;}
+  label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;}
+  input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:17px;text-align:center;letter-spacing:1px;}
+  input:focus{outline:none;border-color:var(--accent);}
+  .primaryBtn{width:100%;margin-top:14px;padding:13px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:600;cursor:pointer;}
+  .primaryBtn:disabled{opacity:.5;cursor:default;}
+  .msg{min-height:18px;font-size:13px;text-align:center;margin-top:10px;color:var(--danger);}
+  .employeeCard{display:none;}
+  .employeeCard.show{display:block;}
+  .employeeName{font-size:18px;font-weight:700;text-align:center;margin:2px 0 2px;}
+  .employeeSub{font-size:13px;color:var(--muted);text-align:center;margin-bottom:20px;}
+  .stepList{display:flex;flex-direction:column;gap:10px;margin-bottom:6px;}
+  .stepRow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:10px;background:var(--panel2);border:1px solid var(--border);}
+  .stepLabel{font-size:14.5px;font-weight:600;}
+  .stepTime{font-size:13px;color:var(--muted);}
+  .stepBtn{padding:9px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .stepBtn:disabled{background:var(--border);color:var(--muted);cursor:default;}
+  .stepBtn.done{background:var(--success);}
+  .changeBtn{display:block;margin:18px auto 0;background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;text-decoration:underline;}
+  .adminLink{display:block;text-align:center;margin-top:18px;color:var(--muted);font-size:12px;text-decoration:none;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🕐 Pointage</h1>
+  <p class="subtitle">Entrez votre matricule pour pointer</p>
+
+  <div id="matriculeForm">
+    <label for="matriculeInput">Matricule</label>
+    <input id="matriculeInput" inputmode="numeric" placeholder="ex: 147" autofocus>
+    <button class="primaryBtn" id="lookupBtn">Continuer</button>
+    <div class="msg" id="lookupMsg"></div>
+  </div>
+
+  <div class="employeeCard" id="employeeCard">
+    <div class="employeeName" id="employeeName"></div>
+    <div class="employeeSub" id="employeeSub"></div>
+    <div class="stepList">
+      <div class="stepRow">
+        <div><div class="stepLabel">Arrivée</div><div class="stepTime" id="timeArrivee">—</div></div>
+        <button class="stepBtn" id="btnArrivee" data-action="arrivee">Pointer</button>
+      </div>
+      <div class="stepRow">
+        <div><div class="stepLabel">Début de pause</div><div class="stepTime" id="timePauseDebut">—</div></div>
+        <button class="stepBtn" id="btnPauseDebut" data-action="pause-debut">Pointer</button>
+      </div>
+      <div class="stepRow">
+        <div><div class="stepLabel">Fin de pause</div><div class="stepTime" id="timePauseFin">—</div></div>
+        <button class="stepBtn" id="btnPauseFin" data-action="pause-fin">Pointer</button>
+      </div>
+      <div class="stepRow">
+        <div><div class="stepLabel">Départ</div><div class="stepTime" id="timeDepart">—</div></div>
+        <button class="stepBtn" id="btnDepart" data-action="depart">Pointer</button>
+      </div>
+    </div>
+    <div class="msg" id="actionMsg"></div>
+    <button class="changeBtn" id="changeBtn">Ce n'est pas moi — changer de matricule</button>
+  </div>
+
+  <a class="adminLink" href="/admin.html">Espace responsable →</a>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let currentMatricule = null;
+
+  async function api(path, opts) {
+    const res = await fetch(path, opts);
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* pas de corps */ }
+    if (!res.ok) throw new Error((data && data.error) || ('Erreur HTTP ' + res.status));
+    return data;
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function renderState(today) {
+    $('timeArrivee').textContent = fmtTime(today.arrivalAt);
+    $('timePauseDebut').textContent = fmtTime(today.breakStartAt);
+    $('timePauseFin').textContent = fmtTime(today.breakEndAt);
+    $('timeDepart').textContent = fmtTime(today.departureAt);
+
+    setStepBtn('btnArrivee', !today.arrivalAt, !!today.arrivalAt);
+    setStepBtn('btnPauseDebut', !!today.arrivalAt && !today.breakStartAt && !today.departureAt, !!today.breakStartAt);
+    setStepBtn('btnPauseFin', !!today.breakStartAt && !today.breakEndAt, !!today.breakEndAt);
+    const canDepart = !!today.arrivalAt && !today.departureAt && (!today.breakStartAt || !!today.breakEndAt);
+    setStepBtn('btnDepart', canDepart, !!today.departureAt);
+  }
+
+  function setStepBtn(id, enabled, done) {
+    const btn = $(id);
+    btn.disabled = !enabled;
+    btn.textContent = done ? '✓ Fait' : 'Pointer';
+    btn.classList.toggle('done', done);
+  }
+
+  $('lookupBtn').addEventListener('click', async () => {
+    const matricule = $('matriculeInput').value.trim();
+    $('lookupMsg').textContent = '';
+    if (!matricule) return;
+    $('lookupBtn').disabled = true;
+    try {
+      const data = await api('/api/pointage/etat/' + encodeURIComponent(matricule));
+      currentMatricule = matricule;
+      $('employeeName').textContent = data.employee.firstName + ' ' + data.employee.lastName;
+      $('employeeSub').textContent = data.employee.department + ' — ' + data.employee.section;
+      renderState(data.today);
+      $('matriculeForm').style.display = 'none';
+      $('employeeCard').classList.add('show');
+      // Arme le retour auto tout de suite (voir scheduleAutoReset plus bas) :
+      // sans ça, quelqu'un qui consulte son état puis repart sans rien
+      // cliquer laisserait l'écran affiché sur son nom indéfiniment.
+      scheduleAutoReset(20000);
+    } catch (err) {
+      $('lookupMsg').textContent = err.message;
+    } finally {
+      $('lookupBtn').disabled = false;
+    }
+  });
+
+  $('matriculeInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('lookupBtn').click();
+  });
+
+  document.querySelectorAll('.stepBtn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const action = btn.dataset.action;
+      $('actionMsg').style.color = 'var(--danger)';
+      $('actionMsg').textContent = '';
+      btn.disabled = true;
+      try {
+        const data = await api('/api/pointage/' + action, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matricule: currentMatricule }),
+        });
+        renderState(data.today);
+        $('actionMsg').style.color = 'var(--success)';
+        $('actionMsg').textContent = 'Enregistré.';
+        // Retour automatique à l'écran "matricule" après un pointage réussi
+        // (voir resetToMatriculeForm) : cette page sert le plus souvent sur
+        // un appareil PARTAGÉ à l'entrée (tout le monde n'a pas de
+        // téléphone) — sans ce retour auto, l'écran resterait affiché sur le
+        // nom de la dernière personne, obligeant chacun à cliquer "Ce n'est
+        // pas moi" avant de pouvoir pointer à son tour.
+        scheduleAutoReset(2500);
+      } catch (err) {
+        $('actionMsg').textContent = err.message;
+        btn.disabled = false;
+      }
+    });
+  });
+
+  let autoResetTimer = null;
+  function scheduleAutoReset(delayMs) {
+    clearTimeout(autoResetTimer);
+    autoResetTimer = setTimeout(resetToMatriculeForm, delayMs);
+  }
+
+  function resetToMatriculeForm() {
+    clearTimeout(autoResetTimer);
+    currentMatricule = null;
+    $('matriculeInput').value = '';
+    $('lookupMsg').textContent = '';
+    $('actionMsg').textContent = '';
+    $('employeeCard').classList.remove('show');
+    $('matriculeForm').style.display = 'block';
+    $('matriculeInput').focus();
+  }
+
+  $('changeBtn').addEventListener('click', resetToMatriculeForm);
+
+  // Filet de sécurité "appareil partagé" : si quelqu'un tape son matricule
+  // (ou le retrouve après un pointage) puis s'en va sans cliquer nulle part
+  // — appelé au téléphone, distrait — l'écran ne doit pas rester bloqué sur
+  // son nom indéfiniment pour la personne suivante. 20 secondes d'inactivité
+  // sur l'écran de pointage ramène automatiquement au clavier de matricule.
+  ['click', 'touchstart', 'keydown'].forEach((evt) => {
+    document.addEventListener(evt, () => {
+      if ($('employeeCard').classList.contains('show')) scheduleAutoReset(20000);
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Un compte "responsable/RH" : connexion séparée des employés (voir
+// Employee, qui n'a pas de mot de passe — juste un matricule, voir
+// pointage.controller.js). Ne gère ici QUE les identifiants de connexion à
+// l'espace admin, pas les employés eux-mêmes.
+model AdminUser {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+}
+
+// Un employé à pointer. Pas de mot de passe : l'employé s'identifie par son
+// seul matricule (choix de Lancine — le plus simple/rapide au quotidien),
+// donc AUCUNE information sensible ne doit être accessible juste avec un
+// matricule connu (voir pointage.controller.js, qui ne renvoie jamais autre
+// chose que "confirmé"/l'état du jour à ce stade de l'identification).
+model Employee {
+  id         String      @id @default(uuid())
+  // Identifiant interne de l'entreprise (ex: "147") — ce que l'employé tape
+  // pour pointer. Unique, mais PAS l'id technique (id) pour permettre de
+  // réattribuer un matricule si besoin sans casser l'historique existant.
+  matricule  String      @unique
+  firstName  String
+  lastName   String
+  department String
+  section    String
+  // Un employé qui quitte l'entreprise n'est pas supprimé (on garde son
+  // historique de pointages pour la paie/les archives) — juste désactivé :
+  // son matricule ne fonctionne plus pour pointer, mais reste visible dans
+  // l'espace admin/les exports passés.
+  active     Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  timeEntries TimeEntry[]
+}
+
+// Le pointage d'UN employé pour UNE journée (voir la contrainte unique
+// employeeId+date plus bas) : arrivée, pause (une seule pour l'instant, voir
+// discussion avec Lancine), départ. Chaque horodatage est rempli au fur et à
+// mesure de la journée (nullable tant que l'étape suivante n'a pas eu lieu),
+// jamais modifié rétroactivement par l'employé lui-même (voir
+// pointage.controller.js : chaque action ne peut se produire qu'une fois et
+// dans l'ordre).
+model TimeEntry {
+  id            String    @id @default(uuid())
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id])
+  // Date du jour pointé (sans l'heure) — stockée à minuit UTC, comparée
+  // uniquement par sa partie date (voir utils/workday.js, todayDateOnly()).
+  date          DateTime
+  arrivalAt     DateTime?
+  breakStartAt  DateTime?
+  breakEndAt    DateTime?
+  departureAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([date])
+}
