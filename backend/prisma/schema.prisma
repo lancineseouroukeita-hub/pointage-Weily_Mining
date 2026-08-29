@@ -7,6 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Réglages globaux de l'appli, une seule ligne (id fixe "default") — pour
+// l'instant juste la couleur de fond, choisie par Lancine via un sélecteur
+// de couleur dans l'espace admin (demande du 29/08/2026), appliquée à la
+// fois sur l'écran de pointage (kiosque) et l'espace admin. Lisible SANS
+// authentification (voir settings.controller.js) car l'écran de pointage
+// n'a pas de connexion — ce n'est qu'une couleur, aucune donnée sensible.
+model AppSetting {
+  id              String  @id @default("default")
+  backgroundColor String  @default("#0f1115")
+  // Image de fond optionnelle, encodée en data URL (base64) directement en
+  // base — demande de Lancine du 29/08/2026. PAS stockée comme fichier sur
+  // le disque du serveur Render : ce disque est éphémère (effacé à chaque
+  // redéploiement), alors que la base Postgres (Aiven) est persistante.
+  // Taille limitée côté upload (voir settings.controller.js) pour éviter de
+  // gonfler démesurément cette colonne/le temps de chargement du kiosque.
+  backgroundImage String?
+}
+
 // Un compte "responsable/RH" : connexion séparée des employés (voir
 // Employee, qui n'a pas de mot de passe — juste un matricule, voir
 // pointage.controller.js). Ne gère ici QUE les identifiants de connexion à

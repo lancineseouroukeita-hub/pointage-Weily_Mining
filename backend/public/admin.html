@@ -63,6 +63,8 @@
   .sortableHeader{cursor:pointer;user-select:none;}
   .sortableHeader:hover{color:var(--text);}
   .sortArrow{font-size:10px;color:var(--accent);}
+  .colorSwatch{width:44px;height:44px;border-radius:10px;border:2px solid var(--border);cursor:pointer;position:relative;}
+  .colorSwatch.selected{border-color:#fff;box-shadow:0 0 0 2px var(--accent);}
   .msg{font-size:13px;margin-top:10px;min-height:16px;}
   .msg.error{color:var(--danger);}
   .msg.success{color:var(--success);}
@@ -99,6 +101,7 @@
     <button class="navBtn active" data-tab="employees">Employés</button>
     <button class="navBtn" data-tab="entries">Pointages</button>
     <button class="navBtn" data-tab="export">Export Excel</button>
+    <button class="navBtn" data-tab="settings">Réglages</button>
   </nav>
   <main>
 
@@ -208,6 +211,35 @@
         <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Utilise la période Du/Au/Département choisie ci-dessus : télécharge le fichier Excel correspondant, PUIS supprime définitivement ces pointages de la base — pour repartir d'un tableau vide chaque semaine. Une date de début ET de fin sont obligatoires. Action irréversible : garde bien le fichier téléchargé.</p>
         <button class="secondaryBtn" id="archiveBtn" style="border-color:var(--danger);color:var(--danger);">🗄️ Archiver et vider cette période</button>
         <div class="msg" id="archiveMsg"></div>
+      </div>
+    </div>
+
+    <div class="tabPanel" id="tab-settings">
+      <div class="panelCard">
+        <h2>Couleur de fond</h2>
+        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Appliquée à la fois sur l'écran de pointage et l'espace admin. Sert aussi de couleur de secours si l'image de fond ci-dessous ne charge pas.</p>
+        <div id="colorPresets" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;"></div>
+        <div class="formRow">
+          <div class="formField">
+            <label>Couleur personnalisée</label>
+            <input id="customColorInput" type="color" style="width:70px;height:40px;padding:2px;cursor:pointer;">
+          </div>
+          <button class="primaryBtn" id="saveColorBtn">Enregistrer la couleur</button>
+        </div>
+        <div class="msg" id="settingsMsg"></div>
+      </div>
+      <div class="panelCard">
+        <h2>Image de fond</h2>
+        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Optionnelle — PNG, JPEG ou WEBP, 1,5 Mo maximum. Un léger assombrissement est appliqué automatiquement par-dessus pour que le texte reste lisible.</p>
+        <div id="backgroundImagePreviewWrap" style="display:none;margin-bottom:14px;">
+          <img id="backgroundImagePreview" style="max-width:220px;max-height:120px;border-radius:8px;border:1px solid var(--border);display:block;">
+        </div>
+        <div class="formRow">
+          <input type="file" id="backgroundImageInput" accept="image/png,image/jpeg,image/webp">
+          <button class="primaryBtn" id="uploadImageBtn">⬆️ Envoyer l'image</button>
+          <button class="secondaryBtn" id="removeImageBtn" style="display:none;border-color:var(--danger);color:var(--danger);">Retirer l'image</button>
+        </div>
+        <div class="msg" id="backgroundImageMsg"></div>
       </div>
     </div>
 
@@ -663,6 +695,160 @@
     }
   });
 
+  // ---------- Apparence (couleur/image de fond) ----------
+  // Palette de couleurs sombres "pro" proposées en un clic — demande de
+  // Lancine du 29/08/2026 ("plusieurs codes couleur très professionnel").
+  // Restées volontairement sombres (comme la couleur par défaut) pour que
+  // le texte clair de l'appli reste lisible sans rien ajuster d'autre.
+  const PRESET_COLORS = [
+    { label: 'Anthracite (défaut)', value: '#0f1115' },
+    { label: 'Bleu marine', value: '#0f172a' },
+    { label: 'Bleu nuit', value: '#111827' },
+    { label: 'Gris ardoise', value: '#1e1e24' },
+    { label: 'Vert forêt', value: '#0f1f17' },
+    { label: 'Bordeaux', value: '#1f1113' },
+    { label: 'Violet profond', value: '#17122a' },
+    { label: 'Émeraude foncé', value: '#0d1f1c' },
+  ];
+
+  let currentBackgroundImage = null;
+
+  // Applique couleur + image sur CETTE page (admin.html). La même fonction
+  // existe dans index.html (kiosque) — dupliquée plutôt que partagée car ce
+  // sont deux pages HTML statiques indépendantes sans build step.
+  function applyAppearance(backgroundColor, backgroundImage) {
+    document.documentElement.style.setProperty('--bg', backgroundColor);
+    if (backgroundImage) {
+      // Voile sombre semi-transparent superposé à l'image (voir demande de
+      // Lancine) : garde le texte clair lisible quelle que soit l'image
+      // choisie, sans configuration supplémentaire à faire de son côté.
+      document.body.style.backgroundImage = 'linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,.55)), url("' + backgroundImage + '")';
+      document.body.style.backgroundSize = 'cover';
+      document.body.style.backgroundPosition = 'center';
+      document.body.style.backgroundAttachment = 'fixed';
+    } else {
+      document.body.style.backgroundImage = '';
+    }
+  }
+
+  function renderColorPresets(selectedColor) {
+    const wrap = $('colorPresets');
+    wrap.innerHTML = '';
+    PRESET_COLORS.forEach((preset) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'colorSwatch' + (preset.value.toLowerCase() === (selectedColor || '').toLowerCase() ? ' selected' : '');
+      btn.style.background = preset.value;
+      btn.title = preset.label;
+      btn.addEventListener('click', () => {
+        $('customColorInput').value = preset.value;
+        applyAppearance(preset.value, currentBackgroundImage);
+        renderColorPresets(preset.value);
+      });
+      wrap.appendChild(btn);
+    });
+  }
+
+  async function loadSettings() {
+    // Pas besoin d'être connecté pour LIRE ce réglage (voir
+    // settings.routes.js) : on utilise fetch() directement plutôt que
+    // api(), qui ajouterait un Authorization vide/inutile ici, et surtout
+    // pour que l'apparence s'applique dès l'écran de connexion, avant tout
+    // login.
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      currentBackgroundImage = data.backgroundImage;
+      applyAppearance(data.backgroundColor, data.backgroundImage);
+      $('customColorInput').value = data.backgroundColor;
+      renderColorPresets(data.backgroundColor);
+      if (data.backgroundImage) {
+        $('backgroundImagePreview').src = data.backgroundImage;
+        $('backgroundImagePreviewWrap').style.display = 'block';
+        $('removeImageBtn').style.display = 'inline-block';
+      } else {
+        $('backgroundImagePreviewWrap').style.display = 'none';
+        $('removeImageBtn').style.display = 'none';
+      }
+    } catch (err) {
+      // Pas grave si ça échoue (ex: hors-ligne) : l'appli garde juste la
+      // couleur par défaut définie en CSS.
+    }
+  }
+
+  $('saveColorBtn').addEventListener('click', async () => {
+    const msg = $('settingsMsg');
+    msg.className = 'msg'; msg.textContent = '';
+    try {
+      const data = await api('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ backgroundColor: $('customColorInput').value }),
+      });
+      applyAppearance(data.backgroundColor, currentBackgroundImage);
+      renderColorPresets(data.backgroundColor);
+      msg.className = 'msg success';
+      msg.textContent = 'Couleur enregistrée.';
+    } catch (err) {
+      msg.className = 'msg error';
+      msg.textContent = err.message;
+    }
+  });
+
+  $('uploadImageBtn').addEventListener('click', async () => {
+    const msg = $('backgroundImageMsg');
+    msg.className = 'msg'; msg.textContent = '';
+    const file = $('backgroundImageInput').files[0];
+    if (!file) {
+      msg.className = 'msg error';
+      msg.textContent = 'Choisis une image (PNG, JPEG ou WEBP).';
+      return;
+    }
+    $('uploadImageBtn').disabled = true;
+    msg.textContent = 'Envoi en cours…';
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await fetch('/api/settings/background-image', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+        body: formData,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((data && data.error) || ('Erreur HTTP ' + res.status));
+      currentBackgroundImage = data.backgroundImage;
+      applyAppearance(data.backgroundColor, data.backgroundImage);
+      $('backgroundImagePreview').src = data.backgroundImage;
+      $('backgroundImagePreviewWrap').style.display = 'block';
+      $('removeImageBtn').style.display = 'inline-block';
+      $('backgroundImageInput').value = '';
+      msg.className = 'msg success';
+      msg.textContent = 'Image enregistrée.';
+    } catch (err) {
+      msg.className = 'msg error';
+      msg.textContent = err.message;
+    } finally {
+      $('uploadImageBtn').disabled = false;
+    }
+  });
+
+  $('removeImageBtn').addEventListener('click', async () => {
+    if (!confirm("Retirer l'image de fond et revenir à la couleur seule ?")) return;
+    const msg = $('backgroundImageMsg');
+    try {
+      const data = await api('/api/settings/background-image', { method: 'DELETE' });
+      currentBackgroundImage = null;
+      applyAppearance(data.backgroundColor, null);
+      $('backgroundImagePreviewWrap').style.display = 'none';
+      $('removeImageBtn').style.display = 'none';
+      msg.className = 'msg success';
+      msg.textContent = 'Image retirée.';
+    } catch (err) {
+      msg.className = 'msg error';
+      msg.textContent = err.message;
+    }
+  });
+
+  loadSettings();
   trySession();
 })();
 </script>

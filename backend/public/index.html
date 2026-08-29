@@ -88,6 +88,26 @@
   const $ = (id) => document.getElementById(id);
   let currentMatricule = null;
 
+  // Couleur/image de fond choisies par l'admin (voir admin.html, onglet
+  // Réglages) — appliquées ici aussi car c'est un réglage de l'appli
+  // entière, pas seulement de l'espace admin (demande de Lancine du
+  // 29/08/2026). Lecture publique, sans connexion (voir settings.routes.js).
+  function applyAppearance(backgroundColor, backgroundImage) {
+    document.documentElement.style.setProperty('--bg', backgroundColor);
+    if (backgroundImage) {
+      document.body.style.backgroundImage = 'linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,.55)), url("' + backgroundImage + '")';
+      document.body.style.backgroundSize = 'cover';
+      document.body.style.backgroundPosition = 'center';
+      document.body.style.backgroundAttachment = 'fixed';
+    } else {
+      document.body.style.backgroundImage = '';
+    }
+  }
+  fetch('/api/settings')
+    .then((res) => res.json())
+    .then((data) => applyAppearance(data.backgroundColor, data.backgroundImage))
+    .catch(() => { /* pas grave si ça échoue (ex: hors-ligne) : couleur par défaut du CSS */ });
+
   async function api(path, opts) {
     const res = await fetch(path, opts);
     let data = null;
