@@ -90,6 +90,11 @@
   .notifItem .niName{font-weight:600;}
   .notifItem .niDetail{color:var(--muted);font-size:12px;margin-top:1px;}
   .notifEmpty{padding:14px;color:var(--muted);font-size:13px;text-align:center;}
+  /* Onglet "Pointage" dans l'espace admin (29/08/2026) — mêmes états visuels
+     que les boutons de la page kiosque (index.html) : gris/désactivé tant
+     que l'étape n'est pas disponible, vert une fois faite. */
+  .ptrStepBtn:disabled{background:var(--border);color:var(--muted);}
+  .ptrStepBtn.done{background:var(--success);}
   .msg{font-size:13px;margin-top:10px;min-height:16px;}
   .msg.error{color:var(--danger);}
   .msg.success{color:var(--success);}
@@ -138,12 +143,56 @@
     </div>
   </header>
   <nav>
+    <!-- Onglet "Pointage" ajouté ici (29/08/2026) : Lancine voulait pouvoir
+         pointer directement depuis l'espace admin, sans devoir ouvrir une
+         deuxième fenêtre/onglet séparé pour la page kiosque (voir index.html,
+         même logique reprise ici). -->
+    <button class="navBtn" data-tab="pointer">Pointage</button>
     <button class="navBtn active" data-tab="employees">Employés</button>
     <button class="navBtn" data-tab="entries">Pointages</button>
     <button class="navBtn" data-tab="export">Export Excel</button>
     <button class="navBtn" data-tab="settings">Réglages</button>
   </nav>
   <main>
+
+    <div class="tabPanel" id="tab-pointer">
+      <div class="panelCard" style="max-width:420px;">
+        <h2>🕐 Pointer un employé</h2>
+        <div id="ptrMatriculeForm">
+          <div class="formField" style="min-width:100%;">
+            <label for="ptrMatriculeInput">Matricule</label>
+            <input id="ptrMatriculeInput" inputmode="numeric" placeholder="ex: 147" style="width:100%;text-align:center;font-size:17px;letter-spacing:1px;">
+          </div>
+          <button class="primaryBtn" id="ptrLookupBtn" style="width:100%;margin-top:14px;">Continuer</button>
+          <div class="msg error" id="ptrLookupMsg"></div>
+        </div>
+
+        <div id="ptrEmployeeCard" style="display:none;">
+          <div style="font-size:18px;font-weight:700;text-align:center;margin:14px 0 2px;" id="ptrEmployeeName"></div>
+          <div style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:18px;" id="ptrEmployeeSub"></div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:6px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:10px;background:var(--panel2);border:1px solid var(--border);">
+              <div><div style="font-size:14.5px;font-weight:600;">Arrivée</div><div style="font-size:13px;color:var(--muted);" id="ptrTimeArrivee">—</div></div>
+              <button class="primaryBtn ptrStepBtn" id="ptrBtnArrivee" data-action="arrivee">Pointer</button>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:10px;background:var(--panel2);border:1px solid var(--border);">
+              <div><div style="font-size:14.5px;font-weight:600;">Début de pause</div><div style="font-size:13px;color:var(--muted);" id="ptrTimePauseDebut">—</div></div>
+              <button class="primaryBtn ptrStepBtn" id="ptrBtnPauseDebut" data-action="pause-debut">Pointer</button>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:10px;background:var(--panel2);border:1px solid var(--border);">
+              <div><div style="font-size:14.5px;font-weight:600;">Fin de pause</div><div style="font-size:13px;color:var(--muted);" id="ptrTimePauseFin">—</div></div>
+              <button class="primaryBtn ptrStepBtn" id="ptrBtnPauseFin" data-action="pause-fin">Pointer</button>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:10px;background:var(--panel2);border:1px solid var(--border);">
+              <div><div style="font-size:14.5px;font-weight:600;">Départ</div><div style="font-size:13px;color:var(--muted);" id="ptrTimeDepart">—</div></div>
+              <button class="primaryBtn ptrStepBtn" id="ptrBtnDepart" data-action="depart">Pointer</button>
+            </div>
+          </div>
+          <div class="msg" id="ptrActionMsg"></div>
+          <button class="rowActionBtn" id="ptrChangeBtn" style="display:block;margin:14px auto 0;">Changer de matricule</button>
+        </div>
+      </div>
+    </div>
 
     <div class="tabPanel show" id="tab-employees">
       <div class="panelCard">
@@ -593,6 +642,104 @@
       btn.classList.add('active');
       $('tab-' + btn.dataset.tab).classList.add('show');
       if (btn.dataset.tab === 'entries') loadEntries();
+      if (btn.dataset.tab === 'pointer') $('ptrMatriculeInput').focus();
+    });
+  });
+
+  // ---------- Pointage (dans l'espace admin) ----------
+  // Reprend exactement la même logique que la page kiosque (index.html) —
+  // matricule -> état du jour -> boutons d'étape -> retour auto au clavier
+  // matricule — pour que Lancine puisse pointer directement depuis l'espace
+  // admin sans devoir garder une deuxième fenêtre/onglet ouverte à côté
+  // (demande du 29/08/2026, "facilité l'utilisation"). Les routes appelées
+  // (/api/pointage/...) sont publiques (pas de requireAdmin, voir
+  // pointage.routes.js) donc utilisables ici sans changement côté serveur.
+  let ptrCurrentMatricule = null;
+
+  function ptrSetStepBtn(id, enabled, done) {
+    const btn = $(id);
+    btn.disabled = !enabled;
+    btn.textContent = done ? '✓ Fait' : 'Pointer';
+    btn.classList.toggle('done', done);
+  }
+
+  function ptrRenderState(today) {
+    $('ptrTimeArrivee').textContent = fmtTime(today.arrivalAt);
+    $('ptrTimePauseDebut').textContent = fmtTime(today.breakStartAt);
+    $('ptrTimePauseFin').textContent = fmtTime(today.breakEndAt);
+    $('ptrTimeDepart').textContent = fmtTime(today.departureAt);
+
+    ptrSetStepBtn('ptrBtnArrivee', !today.arrivalAt, !!today.arrivalAt);
+    ptrSetStepBtn('ptrBtnPauseDebut', !!today.arrivalAt && !today.breakStartAt && !today.departureAt, !!today.breakStartAt);
+    ptrSetStepBtn('ptrBtnPauseFin', !!today.breakStartAt && !today.breakEndAt, !!today.breakEndAt);
+    const canDepart = !!today.arrivalAt && !today.departureAt && (!today.breakStartAt || !!today.breakEndAt);
+    ptrSetStepBtn('ptrBtnDepart', canDepart, !!today.departureAt);
+  }
+
+  let ptrAutoResetTimer = null;
+  function ptrScheduleAutoReset(delayMs) {
+    clearTimeout(ptrAutoResetTimer);
+    ptrAutoResetTimer = setTimeout(ptrResetToMatriculeForm, delayMs);
+  }
+  function ptrResetToMatriculeForm() {
+    clearTimeout(ptrAutoResetTimer);
+    ptrCurrentMatricule = null;
+    $('ptrMatriculeInput').value = '';
+    $('ptrLookupMsg').textContent = '';
+    $('ptrActionMsg').textContent = '';
+    $('ptrEmployeeCard').style.display = 'none';
+    $('ptrMatriculeForm').style.display = 'block';
+  }
+
+  $('ptrLookupBtn').addEventListener('click', async () => {
+    const matricule = $('ptrMatriculeInput').value.trim();
+    $('ptrLookupMsg').textContent = '';
+    if (!matricule) return;
+    $('ptrLookupBtn').disabled = true;
+    try {
+      const data = await api('/api/pointage/etat/' + encodeURIComponent(matricule));
+      ptrCurrentMatricule = matricule;
+      $('ptrEmployeeName').textContent = data.employee.firstName + ' ' + data.employee.lastName;
+      $('ptrEmployeeSub').textContent = data.employee.department + ' — ' + data.employee.section;
+      ptrRenderState(data.today);
+      $('ptrMatriculeForm').style.display = 'none';
+      $('ptrEmployeeCard').style.display = 'block';
+      ptrScheduleAutoReset(20000);
+    } catch (err) {
+      $('ptrLookupMsg').textContent = err.message;
+    } finally {
+      $('ptrLookupBtn').disabled = false;
+    }
+  });
+  $('ptrMatriculeInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('ptrLookupBtn').click();
+  });
+  document.querySelectorAll('.ptrStepBtn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const action = btn.dataset.action;
+      $('ptrActionMsg').className = 'msg error';
+      $('ptrActionMsg').textContent = '';
+      btn.disabled = true;
+      try {
+        const data = await api('/api/pointage/' + action, {
+          method: 'POST',
+          body: JSON.stringify({ matricule: ptrCurrentMatricule }),
+        });
+        ptrRenderState(data.today);
+        $('ptrActionMsg').className = 'msg success';
+        $('ptrActionMsg').textContent = 'Enregistré.';
+        ptrScheduleAutoReset(2500);
+      } catch (err) {
+        $('ptrActionMsg').className = 'msg error';
+        $('ptrActionMsg').textContent = err.message;
+        btn.disabled = false;
+      }
+    });
+  });
+  $('ptrChangeBtn').addEventListener('click', ptrResetToMatriculeForm);
+  ['click', 'touchstart', 'keydown'].forEach((evt) => {
+    document.addEventListener(evt, () => {
+      if ($('ptrEmployeeCard').style.display !== 'none' && $('tab-pointer').classList.contains('show')) ptrScheduleAutoReset(20000);
     });
   });
 
