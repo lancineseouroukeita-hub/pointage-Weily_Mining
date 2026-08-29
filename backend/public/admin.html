@@ -1091,6 +1091,12 @@
       const data = await api('/api/report/archive?' + params.toString(), { method: 'POST' });
       msg.className = 'msg success';
       msg.textContent = data.deletedCount + ' pointage(s) exporté(s) puis supprimé(s).';
+      // Sans ça, le badge "Pointé(e)" de l'onglet Employés restait affiché
+      // pour les employés déjà pointés AVANT le vidage (Lancine l'a signalé
+      // le 29/08/2026) : allEmployees est gardé en mémoire côté client et
+      // n'était jamais rafraîchi après une suppression, seulement après un
+      // nouveau pointage ou un rechargement complet de la page.
+      await loadEmployees();
     } catch (err) {
       msg.className = 'msg error';
       msg.textContent = err.message;
