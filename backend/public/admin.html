@@ -134,6 +134,14 @@
             <label>Rechercher par matricule</label>
             <input id="employeeSearch" placeholder="ex: 147">
           </div>
+          <div class="formField" style="min-width:200px;">
+            <label>Département</label>
+            <select id="employeeDeptFilter"><option value="">(tous)</option></select>
+          </div>
+          <div class="formField" style="min-width:200px;">
+            <label>Section</label>
+            <select id="employeeSectionFilter"><option value="">(toutes)</option></select>
+          </div>
         </div>
         <div class="tableWrap">
           <table>
@@ -317,14 +325,40 @@
   async function loadEmployees() {
     const data = await api('/api/employees');
     allEmployees = data.employees;
+    populateFilterOptions();
     renderEmployees();
+  }
+
+  // Remplit les listes déroulantes Département/Section avec les valeurs
+  // réellement présentes dans la liste (pas une liste fixe codée en dur —
+  // Lancine a des départements/sections variés selon son fichier importé).
+  // Garde la sélection en cours si elle existe toujours après un rechargement
+  // (ex: après avoir supprimé/désactivé un employé).
+  function populateFilterOptions() {
+    const fillSelect = (selectEl, field) => {
+      const previous = selectEl.value;
+      const values = Array.from(new Set(allEmployees.map((e) => e[field]).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      selectEl.innerHTML = `<option value="">${field === 'department' ? '(tous)' : '(toutes)'}</option>` +
+        values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+      if (values.includes(previous)) selectEl.value = previous;
+    };
+    fillSelect($('employeeDeptFilter'), 'department');
+    fillSelect($('employeeSectionFilter'), 'section');
   }
 
   function renderEmployees() {
     const query = $('employeeSearch').value.trim().toLowerCase();
+    const deptFilter = $('employeeDeptFilter').value;
+    const sectionFilter = $('employeeSectionFilter').value;
     let list = allEmployees;
     if (query) {
       list = list.filter((e) => e.matricule.toLowerCase().includes(query));
+    }
+    if (deptFilter) {
+      list = list.filter((e) => e.department === deptFilter);
+    }
+    if (sectionFilter) {
+      list = list.filter((e) => e.section === sectionFilter);
     }
     if (sortField) {
       list = list.slice().sort((a, b) => {
@@ -377,6 +411,8 @@
   }
 
   $('employeeSearch').addEventListener('input', renderEmployees);
+  $('employeeDeptFilter').addEventListener('change', renderEmployees);
+  $('employeeSectionFilter').addEventListener('change', renderEmployees);
 
   document.querySelectorAll('.sortableHeader').forEach((th) => {
     th.addEventListener('click', () => {
