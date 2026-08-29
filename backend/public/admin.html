@@ -65,6 +65,11 @@
   .sortArrow{font-size:10px;color:var(--accent);}
   .colorSwatch{width:44px;height:44px;border-radius:10px;border:2px solid var(--border);cursor:pointer;position:relative;}
   .colorSwatch.selected{border-color:#fff;box-shadow:0 0 0 2px var(--accent);}
+  #punchToastContainer{position:fixed;top:20px;right:20px;z-index:1000;display:flex;flex-direction:column;gap:10px;max-width:320px;}
+  .punchToast{background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:punchToastIn .2s ease-out;}
+  .punchToast .ptName{font-weight:700;font-size:14px;}
+  .punchToast .ptDetail{font-size:12.5px;color:var(--muted);margin-top:2px;}
+  @keyframes punchToastIn{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:translateX(0);}}
   .msg{font-size:13px;margin-top:10px;min-height:16px;}
   .msg.error{color:var(--danger);}
   .msg.success{color:var(--success);}
@@ -72,6 +77,8 @@
 </style>
 </head>
 <body>
+
+<div id="punchToastContainer"></div>
 
 <div id="loginScreen">
   <div class="loginCard">
@@ -283,6 +290,81 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // ---------- Notification automatique des nouveaux pointages ----------
+  // Demande de Lancine du 29/08/2026 : quand un employé (ex: un autre
+  // département sur l'appareil partagé) pointe, l'admin doit le voir arriver
+  // ICI sans que l'employé n'ait à envoyer quoi que ce soit. Implémenté par
+  // sondage régulier de /api/report/latest (voir report.controller.js) tant
+  // que l'espace admin reste ouvert dans le navigateur — pas une vraie
+  // notification système (qui marcherait même appli fermée), choix
+  // volontaire de Lancine pour rester simple et fiable.
+  let punchPollTimer = null;
+  let punchPollSince = null;
+
+  function playPunchSound() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      [880, 1160].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const startAt = ctx.currentTime + i * 0.16;
+        gain.gain.setValueAtTime(0.15, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.15);
+        osc.start(startAt);
+        osc.stop(startAt + 0.16);
+      });
+    } catch (err) {
+      // Ignore si l'API audio est indisponible/bloquée par le navigateur —
+      // le bandeau visuel reste affiché de toute façon.
+    }
+  }
+
+  function showPunchToast(evt) {
+    const container = $('punchToastContainer');
+    const div = document.createElement('div');
+    div.className = 'punchToast';
+    div.innerHTML = `<div class="ptName">${escapeHtml(evt.firstName)} ${escapeHtml(evt.lastName)} (${escapeHtml(evt.matricule)})</div>
+      <div class="ptDetail">${escapeHtml(evt.department)} — ${escapeHtml(evt.action)}</div>`;
+    container.appendChild(div);
+    setTimeout(() => div.remove(), 8000);
+  }
+
+  async function pollPunches() {
+    try {
+      const data = await api('/api/report/latest?since=' + encodeURIComponent(punchPollSince));
+      punchPollSince = data.serverNow;
+      if (data.events && data.events.length) {
+        data.events.forEach(showPunchToast);
+        playPunchSound();
+        // Rafraîchit le tableau des pointages s'il est actuellement affiché
+        // (pas la peine sinon — loadEntries() sera de toute façon appelé au
+        // prochain clic sur l'onglet Pointages).
+        if ($('tab-entries').classList.contains('show')) loadEntries();
+      }
+    } catch (err) {
+      // Sondage silencieux : une erreur ponctuelle (réseau, veille du
+      // serveur Render) ne doit pas spammer l'admin de messages d'erreur —
+      // on réessaiera simplement au prochain cycle.
+    }
+  }
+
+  function startPunchPolling() {
+    if (punchPollTimer) return; // déjà démarré
+    punchPollSince = new Date().toISOString(); // ignore tout ce qui a eu lieu avant l'ouverture de l'espace admin
+    punchPollTimer = setInterval(pollPunches, 15000);
+  }
+
+  function stopPunchPolling() {
+    clearInterval(punchPollTimer);
+    punchPollTimer = null;
+  }
+
   // ---------- Auth ----------
   async function trySession() {
     if (!token) return showLogin();
@@ -306,6 +388,7 @@
     $('appScreen').style.display = 'block';
     $('whoami').textContent = admin.name + ' (' + admin.email + ')';
     loadEmployees();
+    startPunchPolling();
   }
 
   $('loginBtn').addEventListener('click', async () => {
@@ -330,6 +413,7 @@
   $('logoutBtn').addEventListener('click', () => {
     token = null;
     localStorage.removeItem(AUTH_KEY);
+    stopPunchPolling();
     showLogin();
   });
 

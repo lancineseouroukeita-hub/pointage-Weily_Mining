@@ -217,4 +217,65 @@ async function archiveAndClearEntries(req, res) {
   return res.json({ deletedCount: result.count });
 }
 
-module.exports = { listEntries, exportEntries, archiveAndClearEntries };
+// Devine QUELLE action vient d'être pointée (arrivée/pause début/pause
+// fin/départ) à partir d'un TimeEntry, pour le message de notification (voir
+// latestEntries ci-dessous) — le champ modifié en dernier est forcément
+// celui dont l'horodatage est le plus proche de `updatedAt` (les 3 autres,
+// s'ils existent, datent d'une étape précédente de la même journée, donc de
+// plusieurs minutes/heures plus tôt). Pas de colonne dédiée en base pour
+// stocker "la dernière action" : ce serait redondant avec ce qu'on peut déjà
+// déduire des 4 horodatages existants.
+function guessLastAction(entry) {
+  const updatedMs = new Date(entry.updatedAt).getTime();
+  const candidates = [
+    { field: 'arrivalAt', label: 'Arrivée' },
+    { field: 'breakStartAt', label: 'Début de pause' },
+    { field: 'breakEndAt', label: 'Fin de pause' },
+    { field: 'departureAt', label: 'Départ' },
+  ];
+  let bestLabel = 'Pointage';
+  let bestDiff = Infinity;
+  for (const c of candidates) {
+    const value = entry[c.field];
+    if (!value) continue;
+    const diff = Math.abs(new Date(value).getTime() - updatedMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestLabel = c.label;
+    }
+  }
+  return bestLabel;
+}
+
+// GET /api/report/latest?since=<ISO> — pointages créés/modifiés depuis
+// `since`, pour que l'espace admin détecte automatiquement les nouveaux
+// pointages sans que l'employé n'ait à "envoyer" quoi que ce soit (demande
+// de Lancine du 29/08/2026) : admin.html interroge cette route toutes les
+// ~15s et affiche une alerte pour chaque nouvel évènement. Renvoie aussi
+// `serverNow` : le client doit s'en servir comme prochain `since` plutôt que
+// sa propre horloge, pour éviter tout souci de décalage horloge client/
+// serveur qui ferait rater ou dupliquer des évènements.
+async function latestEntries(req, res) {
+  const { since } = req.query;
+  const sinceDate = since ? new Date(since) : new Date(Date.now() - 60000);
+  const entries = await prisma.timeEntry.findMany({
+    where: { updatedAt: { gt: sinceDate } },
+    include: { employee: true },
+    orderBy: { updatedAt: 'asc' },
+  });
+  return res.json({
+    serverNow: new Date().toISOString(),
+    events: entries.map((e) => ({
+      id: e.id,
+      matricule: e.employee.matricule,
+      firstName: e.employee.firstName,
+      lastName: e.employee.lastName,
+      department: e.employee.department,
+      section: e.employee.section,
+      action: guessLastAction(e),
+      at: e.updatedAt,
+    })),
+  });
+}
+
+module.exports = { listEntries, exportEntries, archiveAndClearEntries, latestEntries };
