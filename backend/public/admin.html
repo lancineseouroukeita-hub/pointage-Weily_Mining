@@ -445,9 +445,22 @@
     }
   }
 
-  function startPunchPolling() {
+  async function startPunchPolling() {
     if (punchPollTimer) return; // déjà démarré
-    punchPollSince = new Date().toISOString(); // ignore tout ce qui a eu lieu avant l'ouverture de l'espace admin
+    // Amorce punchPollSince avec l'heure du SERVEUR (pas celle de
+    // l'ordinateur de l'admin) : sur un PC dont l'horloge est en avance
+    // (ex: Windows non à jour/non activé), utiliser new Date() ici ferait
+    // partir `since` dans le futur par rapport au serveur, et plus aucun
+    // pointage ne remonterait jamais tant que l'heure réelle ne l'a pas
+    // rattrapé — vu le 29/08/2026 chez Lancine ("ça me dit toujours qu'il
+    // n'y a pas de nouveau pointage"). En repli (si l'appel échoue, ex: hors
+    // ligne au moment de la connexion), on retombe sur l'horloge locale.
+    try {
+      const data = await api('/api/report/server-time');
+      punchPollSince = data.serverNow;
+    } catch (err) {
+      punchPollSince = new Date().toISOString();
+    }
     punchPollTimer = setInterval(pollPunches, 15000);
   }
 

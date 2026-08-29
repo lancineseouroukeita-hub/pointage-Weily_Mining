@@ -278,4 +278,20 @@ async function latestEntries(req, res) {
   });
 }
 
-module.exports = { listEntries, exportEntries, archiveAndClearEntries, latestEntries };
+// GET /api/report/server-time — renvoie juste l'heure du serveur, sans
+// aucun évènement. Sert UNIQUEMENT à amorcer punchPollSince côté client
+// (voir admin.html, startPunchPolling) : si on utilisait l'horloge de
+// l'ordinateur de l'admin pour ce tout premier repère, un PC dont l'horloge
+// est en avance (cas fréquent sur un Windows non à jour/non activé — voir
+// remontée de Lancine du 29/08/2026, "ça me dit toujours qu'il n'y a pas de
+// nouveau pointage") ferait passer `since` dans le FUTUR par rapport au
+// serveur : plus aucun pointage ne dépasserait jamais ce seuil tant que
+// l'horloge réelle ne l'a pas rattrapé, ce qui donne l'impression que la
+// fonctionnalité entière est cassée. En repartant de l'heure du SERVEUR dès
+// le départ, ce problème ne peut plus se produire, quelle que soit
+// l'horloge de l'ordinateur de l'admin.
+async function serverTime(req, res) {
+  return res.json({ serverNow: new Date().toISOString() });
+}
+
+module.exports = { listEntries, exportEntries, archiveAndClearEntries, latestEntries, serverTime };

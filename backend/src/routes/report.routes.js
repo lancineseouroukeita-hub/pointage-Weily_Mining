@@ -1,5 +1,5 @@
 const express = require('express');
-const { listEntries, exportEntries, archiveAndClearEntries, latestEntries } = require('../controllers/report.controller');
+const { listEntries, exportEntries, archiveAndClearEntries, latestEntries, serverTime } = require('../controllers/report.controller');
 const { requireAdmin } = require('../middleware/adminAuth');
 const { asyncHandler } = require('../utils/asyncHandler');
 
@@ -9,6 +9,9 @@ router.get('/entries', requireAdmin, asyncHandler(listEntries));
 // Interrogé toutes les ~15s par admin.html pour détecter automatiquement
 // les nouveaux pointages — voir latestEntries.
 router.get('/latest', requireAdmin, asyncHandler(latestEntries));
+// Amorce punchPollSince côté client sans dépendre de l'horloge de son PC —
+// voir serverTime dans le contrôleur.
+router.get('/server-time', requireAdmin, asyncHandler(serverTime));
 router.get('/export.xlsx', requireAdmin, asyncHandler(exportEntries));
 // POST (pas GET) car cette route SUPPRIME des données — une requête GET doit
 // rester sans effet de bord (voir archiveAndClearEntries).
