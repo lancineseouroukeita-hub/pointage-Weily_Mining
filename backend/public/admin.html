@@ -307,8 +307,14 @@
     if (!iso) return '—';
     return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   }
+  // Jours abrégés en dur (plutôt que toLocaleDateString({weekday:'short'}))
+  // pour un rendu identique partout ("lun", "mar"...) sans le point que
+  // certains navigateurs ajoutent ("lun.") — demande de Lancine du
+  // 29/08/2026 sur le tableau des Pointages.
+  const DAYS_ABBR = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam'];
   function fmtDate(iso) {
-    return new Date(iso).toLocaleDateString('fr-FR');
+    const date = new Date(iso);
+    return `${DAYS_ABBR[date.getDay()]} ${date.toLocaleDateString('fr-FR')}`;
   }
   // Même format "8h30" que côté serveur (voir workday.js/fmtHours) — le
   // serveur renvoie des heures décimales (ex: 8.5), pas déjà formatées.
