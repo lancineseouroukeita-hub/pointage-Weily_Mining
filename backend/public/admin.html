@@ -489,6 +489,17 @@
     punchPollTimer = setInterval(pollPunches, 15000);
   }
 
+  // Un onglet en arrière-plan (ex: Lancine garde l'onglet kiosque actif au
+  // comptoir pendant que l'onglet admin.html reste ouvert derrière) est
+  // ralenti par le navigateur : setInterval n'y tourne plus toutes les 15s
+  // mais beaucoup plus rarement tant que l'onglet n'est pas regardé — ce qui
+  // donnait l'impression que "rien ne se passe là-bas" (29/08/2026). Dès que
+  // l'onglet redevient visible, on force immédiatement un sondage plutôt que
+  // d'attendre le prochain tic, pour ne jamais faire attendre après coup.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && punchPollTimer) pollPunches();
+  });
+
   function stopPunchPolling() {
     clearInterval(punchPollTimer);
     punchPollTimer = null;
