@@ -58,7 +58,11 @@
   .badge.active{background:rgba(46,204,113,.15);color:var(--success);}
   .badge.inactive{background:rgba(255,92,92,.15);color:var(--danger);}
   .tableWrap{overflow-x:auto;}
-  .rowActionBtn{background:none;border:none;color:var(--accent);font-size:12.5px;cursor:pointer;text-decoration:underline;padding:0;}
+  .rowActionBtn{background:none;border:none;color:var(--accent);font-size:12.5px;cursor:pointer;text-decoration:underline;padding:0;margin-right:12px;}
+  .rowActionBtn.danger{color:var(--danger);}
+  .sortableHeader{cursor:pointer;user-select:none;}
+  .sortableHeader:hover{color:var(--text);}
+  .sortArrow{font-size:10px;color:var(--accent);}
   .msg{font-size:13px;margin-top:10px;min-height:16px;}
   .msg.error{color:var(--danger);}
   .msg.success{color:var(--success);}
@@ -125,9 +129,22 @@
       </div>
       <div class="panelCard">
         <h2>Tous les employés</h2>
+        <div class="formRow" style="margin-bottom:14px;">
+          <div class="formField" style="min-width:220px;">
+            <label>Rechercher par matricule</label>
+            <input id="employeeSearch" placeholder="ex: 147">
+          </div>
+        </div>
         <div class="tableWrap">
           <table>
-            <thead><tr><th>Matricule</th><th>Nom</th><th>Département</th><th>Section</th><th>Statut</th><th></th></tr></thead>
+            <thead><tr>
+              <th>Matricule</th>
+              <th>Nom</th>
+              <th class="sortableHeader" data-sort="department">Département <span class="sortArrow" data-arrow="department"></span></th>
+              <th class="sortableHeader" data-sort="section">Section <span class="sortArrow" data-arrow="section"></span></th>
+              <th>Statut</th>
+              <th></th>
+            </tr></thead>
             <tbody id="employeesTbody"></tbody>
           </table>
         </div>
@@ -288,20 +305,52 @@
   });
 
   // ---------- Employés ----------
+  // La liste complète est gardée en mémoire (allEmployees) pour que la
+  // recherche par matricule et le tri par colonne (voir renderEmployees)
+  // s'appliquent instantanément côté client, sans re-solliciter le serveur
+  // à chaque frappe/clic — demande de Lancine du 29/08/2026 (recherche +
+  // tri département/section) sur une liste de 500+ employés.
+  let allEmployees = [];
+  let sortField = null; // 'department' | 'section' | null (ordre serveur par défaut)
+  let sortDir = 1; // 1 = croissant, -1 = décroissant
+
   async function loadEmployees() {
     const data = await api('/api/employees');
+    allEmployees = data.employees;
+    renderEmployees();
+  }
+
+  function renderEmployees() {
+    const query = $('employeeSearch').value.trim().toLowerCase();
+    let list = allEmployees;
+    if (query) {
+      list = list.filter((e) => e.matricule.toLowerCase().includes(query));
+    }
+    if (sortField) {
+      list = list.slice().sort((a, b) => {
+        const av = (a[sortField] || '').toLowerCase();
+        const bv = (b[sortField] || '').toLowerCase();
+        if (av < bv) return -1 * sortDir;
+        if (av > bv) return 1 * sortDir;
+        return 0;
+      });
+    }
+
     const tbody = $('employeesTbody');
     tbody.innerHTML = '';
-    $('employeesEmpty').style.display = data.employees.length ? 'none' : 'block';
-    data.employees.forEach((e) => {
+    $('employeesEmpty').style.display = list.length ? 'none' : 'block';
+    list.forEach((e) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${escapeHtml(e.matricule)}</td>
         <td>${escapeHtml(e.firstName)} ${escapeHtml(e.lastName)}</td>
         <td>${escapeHtml(e.department)}</td>
         <td>${escapeHtml(e.section)}</td>
         <td><span class="badge ${e.active ? 'active' : 'inactive'}">${e.active ? 'Actif' : 'Désactivé'}</span></td>
-        <td><button class="rowActionBtn" data-id="${e.id}" data-active="${e.active}">${e.active ? 'Désactiver' : 'Réactiver'}</button></td>`;
-      tr.querySelector('.rowActionBtn').addEventListener('click', async (ev) => {
+        <td>
+          <button class="rowActionBtn" data-action="toggle" data-id="${e.id}" data-active="${e.active}">${e.active ? 'Désactiver' : 'Réactiver'}</button>
+          <button class="rowActionBtn danger" data-action="delete" data-id="${e.id}" data-name="${escapeHtml(e.firstName + ' ' + e.lastName)}">Supprimer</button>
+        </td>`;
+      tr.querySelector('[data-action="toggle"]').addEventListener('click', async (ev) => {
         const btn = ev.target;
         try {
           await api('/api/employees/' + btn.dataset.id, {
@@ -311,9 +360,38 @@
           loadEmployees();
         } catch (err) { alert(err.message); }
       });
+      tr.querySelector('[data-action="delete"]').addEventListener('click', async (ev) => {
+        const btn = ev.target;
+        if (!confirm(`Supprimer définitivement ${btn.dataset.name} (matricule ${e.matricule}) ?\n\nCette action est irréversible.`)) return;
+        try {
+          await api('/api/employees/' + btn.dataset.id, { method: 'DELETE' });
+          loadEmployees();
+        } catch (err) {
+          // Le serveur refuse (409) si l'employé a déjà des pointages — voir
+          // deleteEmployee côté backend, qui explique pourquoi dans err.message.
+          alert(err.message);
+        }
+      });
       tbody.appendChild(tr);
     });
   }
+
+  $('employeeSearch').addEventListener('input', renderEmployees);
+
+  document.querySelectorAll('.sortableHeader').forEach((th) => {
+    th.addEventListener('click', () => {
+      const field = th.dataset.sort;
+      if (sortField === field) {
+        sortDir *= -1;
+      } else {
+        sortField = field;
+        sortDir = 1;
+      }
+      document.querySelectorAll('.sortArrow').forEach((el) => { el.textContent = ''; });
+      document.querySelector('.sortArrow[data-arrow="' + field + '"]').textContent = sortDir === 1 ? '▲' : '▼';
+      renderEmployees();
+    });
+  });
 
   $('addEmployeeBtn').addEventListener('click', async () => {
     const msg = $('addEmployeeMsg');

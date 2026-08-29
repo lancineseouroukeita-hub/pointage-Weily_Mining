@@ -62,10 +62,29 @@ async function updateEmployee(req, res) {
   return res.json({ employee: serializeEmployee(updated) });
 }
 
-// Pas de suppression : un employé qui part est désactivé (active: false, via
-// updateEmployee), jamais supprimé — voir schema.prisma, ça garderait un
-// pointage orphelin (contrainte de clé étrangère) et perdrait l'historique
-// utile pour la paie/les archives.
+// Suppression volontairement RESTREINTE (demande de Lancine du 29/08/2026,
+// après clarification explicite : "suppression sécurisée") : un employé qui
+// a déjà au moins un pointage enregistré ne peut PAS être supprimé, pour ne
+// jamais casser son historique (utile pour la paie/les archives) — voir
+// schema.prisma, TimeEntry.employeeId référence Employee sans cascade. Dans
+// ce cas, on renvoie une erreur qui invite à désactiver via updateEmployee
+// ci-dessus à la place. Seul un employé JAMAIS pointé (ex: ajouté par
+// erreur, mauvais matricule saisi) peut être réellement supprimé.
+async function deleteEmployee(req, res) {
+  const { id } = req.params;
+  const employee = await prisma.employee.findUnique({ where: { id } });
+  if (!employee) return res.status(404).json({ error: 'Employé introuvable.' });
+
+  const entryCount = await prisma.timeEntry.count({ where: { employeeId: id } });
+  if (entryCount > 0) {
+    return res.status(409).json({
+      error: `Impossible de supprimer : cet employé a déjà ${entryCount} pointage(s) enregistré(s) (historique de paie). Utilise "Désactiver" à la place.`,
+    });
+  }
+
+  await prisma.employee.delete({ where: { id } });
+  return res.json({ ok: true });
+}
 
 // Enlève les accents et met en minuscule ("Département" -> "departement")
 // pour que la reconnaissance des colonnes du fichier importé tolère les
@@ -270,4 +289,4 @@ async function importEmployees(req, res) {
   return res.json({ created, updated, errors, warnings });
 }
 
-module.exports = { listEmployees, createEmployee, updateEmployee, importEmployees, downloadImportTemplate };
+module.exports = { listEmployees, createEmployee, updateEmployee, deleteEmployee, importEmployees, downloadImportTemplate };

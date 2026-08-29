@@ -4,6 +4,7 @@ const {
   listEmployees,
   createEmployee,
   updateEmployee,
+  deleteEmployee,
   importEmployees,
   downloadImportTemplate,
 } = require('../controllers/employee.controller');
@@ -26,6 +27,9 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 router.get('/', requireAdmin, asyncHandler(listEmployees));
 router.post('/', requireAdmin, asyncHandler(createEmployee));
 router.patch('/:id', requireAdmin, asyncHandler(updateEmployee));
+// Voir deleteEmployee : refuse si l'employé a déjà des pointages (409),
+// pour ne jamais perdre d'historique de paie par erreur.
+router.delete('/:id', requireAdmin, asyncHandler(deleteEmployee));
 router.get('/import-template', requireAdmin, asyncHandler(downloadImportTemplate));
 router.post('/import', requireAdmin, upload.single('file'), asyncHandler(importEmployees));
 
