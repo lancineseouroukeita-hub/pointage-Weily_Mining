@@ -394,6 +394,22 @@
     }
   }
 
+  // Annonce vocale du matricule ("147 pointé") en plus du bip d'alerte —
+  // demandé par Lancine le 29/08/2026 pour reconnaître un pointage sans
+  // avoir à regarder l'écran. Utilise la synthèse vocale intégrée du
+  // navigateur (aucun fichier audio à héberger).
+  function announcePunch(evt) {
+    try {
+      if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') return;
+      const utterance = new SpeechSynthesisUtterance(`${evt.matricule} pointé`);
+      utterance.lang = 'fr-FR';
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      // Ignore si la synthèse vocale est indisponible — le bip et le
+      // bandeau visuel restent de toute façon affichés.
+    }
+  }
+
   function showPunchToast(evt) {
     const container = $('punchToastContainer');
     const div = document.createElement('div');
@@ -401,14 +417,16 @@
     div.innerHTML = `<span class="ptClose">✕</span>
       <div class="ptName">${escapeHtml(evt.firstName)} ${escapeHtml(evt.lastName)} (${escapeHtml(evt.matricule)})</div>
       <div class="ptDetail">${escapeHtml(evt.department)} — ${escapeHtml(evt.action)}</div>`;
-    // 20s (au lieu de 8s) + fermeture au clic : Lancine a signalé ne rien
-    // voir arriver — le bandeau disparaissait probablement avant qu'il ne
-    // regarde l'écran. Le laisser plus longtemps réduit le risque de le
-    // rater ; la cloche (voir punchLog) garde de toute façon une trace même
+    // 60s (au lieu de 20s, déjà augmenté depuis 8s) + fermeture au clic :
+    // Lancine a de nouveau signalé ne rien voir arriver — probablement parce
+    // qu'il ne regarde pas l'écran de l'admin au moment exact du pointage
+    // (le bandeau reste visible seulement 20s). En le laissant une minute
+    // pleine, on a beaucoup plus de marge pour aller vérifier l'écran après
+    // coup ; la cloche (voir punchLog) garde de toute façon une trace même
     // si celui-ci disparaît sans avoir été vu.
     div.addEventListener('click', () => div.remove());
     container.appendChild(div);
-    setTimeout(() => div.remove(), 20000);
+    setTimeout(() => div.remove(), 60000);
   }
 
   async function pollPunches() {
@@ -418,6 +436,7 @@
       if (data.events && data.events.length) {
         data.events.forEach(showPunchToast);
         playPunchSound();
+        data.events.forEach(announcePunch);
         // Historique persistant (cloche) : les plus récents en premier,
         // limité à 30 entrées pour ne pas grossir indéfiniment sur une
         // session laissée ouverte toute la journée.
