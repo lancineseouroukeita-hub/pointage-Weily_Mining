@@ -1,7 +1,13 @@
 const ExcelJS = require('exceljs');
 const prisma = require('../config/prisma');
+const { todayDateOnly } = require('../utils/workday');
 
-function serializeEmployee(e) {
+// pointedTodaySet est optionnel (Set vide par défaut) : createEmployee/
+// updateEmployee renvoient un seul employé fraîchement créé/modifié sans se
+// soucier de son statut du jour — l'espace admin recharge de toute façon la
+// liste complète via loadEmployees() juste après (voir admin.html), qui
+// passe par listEmployees ci-dessous où le vrai calcul a lieu.
+function serializeEmployee(e, pointedTodaySet) {
   return {
     id: e.id,
     matricule: e.matricule,
@@ -11,6 +17,12 @@ function serializeEmployee(e) {
     section: e.section,
     active: e.active,
     createdAt: e.createdAt,
+    // "Pointé(e) aujourd'hui" — vrai dès que l'arrivée du jour est
+    // enregistrée (demande de Lancine du 29/08/2026), affiché comme badge
+    // coloré dans la liste des employés (voir admin.html). Reste vrai même
+    // après le départ : ce badge répond à "est-il déjà venu aujourd'hui ?",
+    // pas à "est-il encore présent en ce moment ?".
+    pointedToday: (pointedTodaySet || new Set()).has(e.id),
   };
 }
 
@@ -18,8 +30,15 @@ function serializeEmployee(e) {
 // Employee.active) : l'espace admin doit pouvoir les distinguer/filtrer
 // lui-même plutôt que de les cacher côté serveur.
 async function listEmployees(req, res) {
-  const employees = await prisma.employee.findMany({ orderBy: [{ department: 'asc' }, { lastName: 'asc' }] });
-  return res.json({ employees: employees.map(serializeEmployee) });
+  const [employees, pointedToday] = await Promise.all([
+    prisma.employee.findMany({ orderBy: [{ department: 'asc' }, { lastName: 'asc' }] }),
+    prisma.timeEntry.findMany({
+      where: { date: todayDateOnly(), arrivalAt: { not: null } },
+      select: { employeeId: true },
+    }),
+  ]);
+  const pointedTodaySet = new Set(pointedToday.map((t) => t.employeeId));
+  return res.json({ employees: employees.map((e) => serializeEmployee(e, pointedTodaySet)) });
 }
 
 async function createEmployee(req, res) {

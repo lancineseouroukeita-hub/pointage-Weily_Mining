@@ -54,9 +54,14 @@
   th, td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;}
   th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.02em;}
   tbody tr:hover{background:var(--panel2);}
-  .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11.5px;font-weight:600;}
+  .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11.5px;font-weight:600;margin-right:4px;}
   .badge.active{background:rgba(46,204,113,.15);color:var(--success);}
   .badge.inactive{background:rgba(255,92,92,.15);color:var(--danger);}
+  /* Badge "Pointé(e) aujourd'hui" à côté du badge Actif/Désactivé (demande
+     de Lancine du 29/08/2026) — couleur distincte (accent bleu) de celle du
+     statut actif/inactif pour ne pas les confondre au premier coup d'œil. */
+  .badge.pointed{background:rgba(76,141,255,.15);color:var(--accent);}
+  .badge.notpointed{background:rgba(139,147,163,.15);color:var(--muted);}
   .tableWrap{overflow-x:auto;}
   .rowActionBtn{background:none;border:none;color:var(--accent);font-size:12.5px;cursor:pointer;text-decoration:underline;padding:0;margin-right:12px;}
   .rowActionBtn.danger{color:var(--danger);}
@@ -346,6 +351,20 @@
         // (pas la peine sinon — loadEntries() sera de toute façon appelé au
         // prochain clic sur l'onglet Pointages).
         if ($('tab-entries').classList.contains('show')) loadEntries();
+        // Met à jour le badge "Pointé(e)" de la liste des employés sans
+        // recharger toute la liste (voir demande de Lancine du 29/08/2026) :
+        // n'importe laquelle des 4 étapes reçue ici implique forcément que
+        // l'arrivée du jour a déjà eu lieu (on ne peut pas pointer une pause
+        // ou un départ avant d'être arrivé — voir pointage.controller.js).
+        const pointedMatricules = new Set(data.events.map((e) => e.matricule));
+        let changed = false;
+        allEmployees.forEach((emp) => {
+          if (pointedMatricules.has(emp.matricule) && !emp.pointedToday) {
+            emp.pointedToday = true;
+            changed = true;
+          }
+        });
+        if (changed && $('tab-employees').classList.contains('show')) renderEmployees();
       }
     } catch (err) {
       // Sondage silencieux : une erreur ponctuelle (réseau, veille du
@@ -495,7 +514,7 @@
         <td>${escapeHtml(e.firstName)} ${escapeHtml(e.lastName)}</td>
         <td>${escapeHtml(e.department)}</td>
         <td>${escapeHtml(e.section)}</td>
-        <td><span class="badge ${e.active ? 'active' : 'inactive'}">${e.active ? 'Actif' : 'Désactivé'}</span></td>
+        <td><span class="badge ${e.active ? 'active' : 'inactive'}">${e.active ? 'Actif' : 'Désactivé'}</span><span class="badge ${e.pointedToday ? 'pointed' : 'notpointed'}">${e.pointedToday ? 'Pointé(e)' : 'Non pointé(e)'}</span></td>
         <td>
           <button class="rowActionBtn" data-action="toggle" data-id="${e.id}" data-active="${e.active}">${e.active ? 'Désactiver' : 'Réactiver'}</button>
           <button class="rowActionBtn danger" data-action="delete" data-id="${e.id}" data-name="${escapeHtml(e.firstName + ' ' + e.lastName)}">Supprimer</button>
