@@ -177,6 +177,12 @@
         </div>
         <div class="msg" id="exportMsg"></div>
       </div>
+      <div class="panelCard">
+        <h2>Archiver et vider</h2>
+        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Utilise la période Du/Au/Département choisie ci-dessus : télécharge le fichier Excel correspondant, PUIS supprime définitivement ces pointages de la base — pour repartir d'un tableau vide chaque semaine. Une date de début ET de fin sont obligatoires. Action irréversible : garde bien le fichier téléchargé.</p>
+        <button class="secondaryBtn" id="archiveBtn" style="border-color:var(--danger);color:var(--danger);">🗄️ Archiver et vider cette période</button>
+        <div class="msg" id="archiveMsg"></div>
+      </div>
     </div>
 
   </main>
@@ -446,36 +452,88 @@
   $('entriesFilterBtn').addEventListener('click', loadEntries);
 
   // ---------- Export Excel ----------
-  $('exportBtn').addEventListener('click', async () => {
-    const msg = $('exportMsg');
-    msg.className = 'msg'; msg.textContent = 'Génération en cours…';
+  function exportParams() {
     const params = new URLSearchParams();
     if ($('exportFrom').value) params.set('from', $('exportFrom').value);
     if ($('exportTo').value) params.set('to', $('exportTo').value);
     if ($('exportDept').value.trim()) params.set('department', $('exportDept').value.trim());
+    return params;
+  }
+
+  // Factorisé (utilisé par le bouton export normal ET par "Archiver et
+  // vider" ci-dessous, qui télécharge d'abord le même fichier avant de
+  // supprimer les pointages correspondants).
+  async function downloadExportFile(params) {
+    const res = await fetch('/api/report/export.xlsx?' + params.toString(), {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    if (!res.ok) {
+      let errMsg = 'Erreur HTTP ' + res.status;
+      try { const data = await res.json(); if (data && data.error) errMsg = data.error; } catch (e) { /* ignore */ }
+      throw new Error(errMsg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'pointage.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  $('exportBtn').addEventListener('click', async () => {
+    const msg = $('exportMsg');
+    msg.className = 'msg'; msg.textContent = 'Génération en cours…';
     try {
-      const res = await fetch('/api/report/export.xlsx?' + params.toString(), {
-        headers: { Authorization: 'Bearer ' + token },
-      });
-      if (!res.ok) {
-        let errMsg = 'Erreur HTTP ' + res.status;
-        try { const data = await res.json(); if (data && data.error) errMsg = data.error; } catch (e) { /* ignore */ }
-        throw new Error(errMsg);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'pointage.xlsx';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadExportFile(exportParams());
       msg.className = 'msg success';
       msg.textContent = 'Fichier téléchargé.';
     } catch (err) {
       msg.className = 'msg error';
       msg.textContent = err.message;
+    }
+  });
+
+  // ---------- Archiver et vider ----------
+  // Supprime définitivement, sur demande explicite de Lancine (jamais
+  // automatique — voir report.controller.js/archiveAndClearEntries), les
+  // pointages de la période Du/Au/Département choisie ci-dessus, juste après
+  // en avoir téléchargé l'export Excel. Sert à repartir d'un tableau vide
+  // chaque semaine tout en gardant l'historique dans le fichier Excel.
+  $('archiveBtn').addEventListener('click', async () => {
+    const msg = $('archiveMsg');
+    msg.className = 'msg'; msg.textContent = '';
+    const from = $('exportFrom').value;
+    const to = $('exportTo').value;
+    if (!from || !to) {
+      msg.className = 'msg error';
+      msg.textContent = "Choisis une date de début ET de fin ci-dessus avant d'archiver.";
+      return;
+    }
+    const deptLabel = $('exportDept').value.trim() || 'tous les départements';
+    const confirmed = confirm(
+      'Ceci va télécharger le fichier Excel des pointages du ' + from + ' au ' + to + ' (' + deptLabel + '),\n' +
+      'PUIS SUPPRIMER DÉFINITIVEMENT ces pointages de la base.\n\n' +
+      'Cette action est irréversible. Continuer ?'
+    );
+    if (!confirmed) return;
+
+    $('archiveBtn').disabled = true;
+    try {
+      const params = exportParams();
+      msg.textContent = 'Export en cours…';
+      await downloadExportFile(params);
+      msg.textContent = 'Suppression en cours…';
+      const data = await api('/api/report/archive?' + params.toString(), { method: 'POST' });
+      msg.className = 'msg success';
+      msg.textContent = data.deletedCount + ' pointage(s) exporté(s) puis supprimé(s).';
+    } catch (err) {
+      msg.className = 'msg error';
+      msg.textContent = err.message;
+    } finally {
+      $('archiveBtn').disabled = false;
     }
   });
 

@@ -197,4 +197,24 @@ async function exportEntries(req, res) {
   res.end();
 }
 
-module.exports = { listEntries, exportEntries };
+// POST /api/report/archive?from=&to=&department= — supprime DÉFINITIVEMENT
+// les pointages de la période/filtre donnés. Pensé pour être appelé juste
+// après un téléchargement Excel (voir admin.html, bouton "Archiver et
+// vider") : Lancine veut pouvoir repartir d'un tableau vide chaque semaine
+// tout en gardant l'historique dans le fichier Excel exporté juste avant
+// (demande du 29/08/2026 — voir aussi le choix explicite de NE PAS le faire
+// automatiquement, pour garder la main sur le moment de la suppression).
+// "from" ET "to" sont obligatoires ici (contrairement à listEntries/export) :
+// un appel sans filtre supprimerait TOUT l'historique de pointage, ce qui ne
+// doit jamais arriver par erreur (champs vides oubliés, appel API direct).
+async function archiveAndClearEntries(req, res) {
+  const { from, to, department } = req.query;
+  if (!from || !to) {
+    return res.status(400).json({ error: 'Une période (date de début ET de fin) est obligatoire avant de vider — ça évite de supprimer tout l’historique par erreur.' });
+  }
+  const where = buildWhere({ from, to, department });
+  const result = await prisma.timeEntry.deleteMany({ where });
+  return res.json({ deletedCount: result.count });
+}
+
+module.exports = { listEntries, exportEntries, archiveAndClearEntries };
