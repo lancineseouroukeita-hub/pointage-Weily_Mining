@@ -1,6 +1,6 @@
 const ExcelJS = require('exceljs');
 const prisma = require('../config/prisma');
-const { dateOnly, workedHours, dailyOvertimeHours, weekStart, weekEnd, fmtHours } = require('../utils/workday');
+const { dateOnly, workedHours, dailyOvertimeHours, nightHours, weekStart, weekEnd, fmtHours } = require('../utils/workday');
 
 // Construit la clause "where" commune à la consultation (listEntries) ET à
 // l'export Excel (exportEntries) — évite que les deux finissent par
@@ -50,6 +50,7 @@ async function listEntries(req, res) {
         departureAt: e.departureAt,
         workedHours: hours,
         dailyOvertimeHours: dailyOvertimeHours(hours),
+        nightHours: nightHours(e),
       };
     }),
     weeklySummary,
@@ -73,8 +74,6 @@ async function computeWeeklySummary({ from, to, department }) {
 
   const byKey = new Map();
   for (const e of entries) {
-    const hours = workedHours(e);
-    if (hours === null) continue; // journée incomplète (pas de départ pointé) : ne compte pas dans le total
     const ws = weekStart(e.date);
     const key = e.employeeId + '|' + ws.toISOString();
     if (!byKey.has(key)) {
@@ -85,13 +84,48 @@ async function computeWeeklySummary({ from, to, department }) {
         department: e.employee.department,
         weekStart: ws,
         totalHours: 0,
+        nightHoursTotal: 0,
+        // Jours (0=dimanche...6=samedi) où l'employé a AU MOINS pointé son
+        // arrivée cette semaine-là — sert au bonus "DIM" ci-dessous, même si
+        // le départ de ce jour-là n'est pas encore pointé.
+        daysArrived: new Set(),
+        sundayEntry: null,
       });
     }
-    byKey.get(key).totalHours += hours;
+    const bucket = byKey.get(key);
+    const dayOfWeek = new Date(e.date).getDay();
+    if (e.arrivalAt) bucket.daysArrived.add(dayOfWeek);
+    if (dayOfWeek === 0) bucket.sundayEntry = e;
+
+    const hours = workedHours(e);
+    if (hours === null) continue; // journée incomplète (pas de départ pointé) : ne compte pas dans les totaux d'heures
+    bucket.totalHours += hours;
+    bucket.nightHoursTotal += nightHours(e);
   }
 
   return Array.from(byKey.values())
-    .map((w) => ({ ...w, weeklyOvertimeHours: Math.max(0, w.totalHours - 40) }))
+    .map((w) => {
+      // Bonus "DIM" : demande de Lancine du 29/08/2026 — uniquement quand
+      // l'employé a travaillé les 7 jours de la semaine (lundi à dimanche,
+      // sans jour de repos), on compte à part les heures RÉELLEMENT
+      // travaillées ce dimanche-là (pas un forfait fixe). null si la
+      // condition des 7 jours n'est pas remplie, ou si le dimanche en
+      // question n'est pas encore complet (départ pas encore pointé) —
+      // cohérent avec le reste (workedHours/dailyOvertimeHours).
+      const workedAllWeek = w.daysArrived.size === 7;
+      const dimHours = workedAllWeek && w.sundayEntry ? workedHours(w.sundayEntry) : null;
+      return {
+        matricule: w.matricule,
+        firstName: w.firstName,
+        lastName: w.lastName,
+        department: w.department,
+        weekStart: w.weekStart,
+        totalHours: w.totalHours,
+        weeklyOvertimeHours: Math.max(0, w.totalHours - 40),
+        nightHours: w.nightHoursTotal,
+        dimHours,
+      };
+    })
     .sort((a, b) => {
       if (a.weekStart.getTime() !== b.weekStart.getTime()) return b.weekStart - a.weekStart;
       return a.lastName.localeCompare(b.lastName);
@@ -142,6 +176,7 @@ async function exportEntries(req, res) {
     { header: 'Départ', key: 'departure', width: 10 },
     { header: 'Heures travaillées', key: 'worked', width: 16 },
     { header: 'Heures sup (jour, >8h)', key: 'overtimeDay', width: 20 },
+    { header: 'Heures de nuit (22h-6h)', key: 'nightHours', width: 20 },
   ];
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
@@ -161,6 +196,7 @@ async function exportEntries(req, res) {
       departure: fmtTime(e.departureAt),
       worked: fmtHours(hours),
       overtimeDay: fmtHours(dailyOvertimeHours(hours)),
+      nightHours: fmtHours(nightHours(e)),
     });
   });
 
@@ -175,6 +211,8 @@ async function exportEntries(req, res) {
     { header: 'Département', key: 'department', width: 18 },
     { header: 'Total heures travaillées', key: 'total', width: 20 },
     { header: 'Heures sup (semaine, >40h)', key: 'overtimeWeek', width: 22 },
+    { header: 'Heures de nuit (semaine)', key: 'nightHours', width: 20 },
+    { header: 'Heures DIM (dimanche, si 7j)', key: 'dim', width: 22 },
   ];
   weekSheet.getRow(1).font = { bold: true };
   weekSheet.views = [{ state: 'frozen', ySplit: 1 }];
@@ -187,6 +225,8 @@ async function exportEntries(req, res) {
       department: w.department,
       total: fmtHours(w.totalHours),
       overtimeWeek: fmtHours(w.weeklyOvertimeHours),
+      nightHours: fmtHours(w.nightHours),
+      dim: fmtHours(w.dimHours),
     });
   });
 

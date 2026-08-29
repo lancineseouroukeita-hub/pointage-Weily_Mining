@@ -216,7 +216,7 @@
       <div class="panelCard">
         <div class="tableWrap">
           <table>
-            <thead><tr><th>Date</th><th>Matricule</th><th>Nom</th><th>Département</th><th>Section</th><th>Arrivée</th><th>Début pause</th><th>Fin pause</th><th>Départ</th><th>Heures travaillées</th><th>Heures sup (jour)</th></tr></thead>
+            <thead><tr><th>Date</th><th>Matricule</th><th>Nom</th><th>Département</th><th>Section</th><th>Arrivée</th><th>Début pause</th><th>Fin pause</th><th>Départ</th><th>Heures travaillées</th><th>Heures sup (jour)</th><th>HN (22h-6h)</th></tr></thead>
             <tbody id="entriesTbody"></tbody>
           </table>
         </div>
@@ -224,10 +224,10 @@
       </div>
       <div class="panelCard">
         <h2>Récapitulatif hebdomadaire</h2>
-        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Heures sup au-delà de 40h/semaine (semaine complète lundi→dimanche, même si le filtre ci-dessus ne couvre qu'une partie de la semaine).</p>
+        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Heures sup au-delà de 40h/semaine (semaine complète lundi→dimanche, même si le filtre ci-dessus ne couvre qu'une partie de la semaine). « DIM » = heures réellement travaillées le dimanche, uniquement si l'employé a pointé les 7 jours de cette semaine-là (lundi à dimanche sans repos).</p>
         <div class="tableWrap">
           <table>
-            <thead><tr><th>Semaine du</th><th>Matricule</th><th>Nom</th><th>Département</th><th>Total heures</th><th>Heures sup (semaine)</th></tr></thead>
+            <thead><tr><th>Semaine du</th><th>Matricule</th><th>Nom</th><th>Département</th><th>Total heures</th><th>Heures sup (semaine)</th><th>HN (semaine)</th><th>DIM (dimanche, si 7j)</th></tr></thead>
             <tbody id="weeklyTbody"></tbody>
           </table>
         </div>
@@ -842,7 +842,8 @@
         <td>${escapeHtml(e.department)}</td><td>${escapeHtml(e.section)}</td>
         <td>${fmtTime(e.arrivalAt)}</td><td>${fmtTime(e.breakStartAt)}</td>
         <td>${fmtTime(e.breakEndAt)}</td><td>${fmtTime(e.departureAt)}</td>
-        <td>${fmtHours(e.workedHours)}</td><td>${fmtHours(e.dailyOvertimeHours)}</td>`;
+        <td>${fmtHours(e.workedHours)}</td><td>${fmtHours(e.dailyOvertimeHours)}</td>
+        <td>${fmtHours(e.nightHours)}</td>`;
       tbody.appendChild(tr);
     });
 
@@ -855,7 +856,8 @@
       tr.innerHTML = `<td>${fmtDate(w.weekStart)}</td><td>${escapeHtml(w.matricule)}</td>
         <td>${escapeHtml(w.firstName)} ${escapeHtml(w.lastName)}</td>
         <td>${escapeHtml(w.department)}</td>
-        <td>${fmtHours(w.totalHours)}</td><td>${fmtHours(w.weeklyOvertimeHours)}</td>`;
+        <td>${fmtHours(w.totalHours)}</td><td>${fmtHours(w.weeklyOvertimeHours)}</td>
+        <td>${fmtHours(w.nightHours)}</td><td>${fmtHours(w.dimHours)}</td>`;
       weeklyTbody.appendChild(tr);
     });
   }
