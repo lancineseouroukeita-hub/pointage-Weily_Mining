@@ -71,10 +71,25 @@
   .colorSwatch{width:44px;height:44px;border-radius:10px;border:2px solid var(--border);cursor:pointer;position:relative;}
   .colorSwatch.selected{border-color:#fff;box-shadow:0 0 0 2px var(--accent);}
   #punchToastContainer{position:fixed;top:20px;right:20px;z-index:1000;display:flex;flex-direction:column;gap:10px;max-width:320px;}
-  .punchToast{background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:punchToastIn .2s ease-out;}
-  .punchToast .ptName{font-weight:700;font-size:14px;}
+  .punchToast{background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:punchToastIn .2s ease-out;cursor:pointer;position:relative;}
+  .punchToast .ptName{font-weight:700;font-size:14px;padding-right:16px;}
   .punchToast .ptDetail{font-size:12.5px;color:var(--muted);margin-top:2px;}
+  .punchToast .ptClose{position:absolute;top:8px;right:10px;color:var(--muted);font-size:13px;line-height:1;}
   @keyframes punchToastIn{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:translateX(0);}}
+  /* Cloche + historique persistant des pointages (voir en-tête) — le
+     bandeau punchToast ci-dessus disparaît tout seul, donc on garde un
+     historique qui ne se perd pas si Lancine ne regarde pas l'écran au bon
+     moment (demande du 29/08/2026, "la notification ne m'a rien donné"). */
+  #notifBellBtn{position:relative;}
+  .notifBadge{position:absolute;top:-4px;right:-4px;background:var(--danger);color:#fff;font-size:10.5px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+  .notifDropdown{position:absolute;top:calc(100% + 8px);right:0;width:300px;max-height:360px;overflow-y:auto;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.5);z-index:1000;}
+  .notifDropdownTitle{padding:12px 14px 8px;font-size:12.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
+  .notifList{padding:0 6px 6px;}
+  .notifItem{padding:9px 8px;border-radius:8px;font-size:13px;}
+  .notifItem:hover{background:var(--panel2);}
+  .notifItem .niName{font-weight:600;}
+  .notifItem .niDetail{color:var(--muted);font-size:12px;margin-top:1px;}
+  .notifEmpty{padding:14px;color:var(--muted);font-size:13px;text-align:center;}
   .msg{font-size:13px;margin-top:10px;min-height:16px;}
   .msg.error{color:var(--danger);}
   .msg.success{color:var(--success);}
@@ -106,6 +121,19 @@
            barre d'adresse ni de bouton "précédent" visible. -->
       <a href="/" style="margin-right:16px;">← Pointage</a>
       <span class="who" id="whoami"></span>
+      <!-- Cloche + historique des derniers pointages (voir demande de
+           Lancine du 29/08/2026 : "la notification ne m'a rien donné" —
+           le bandeau ci-dessous (punchToast) disparaît tout seul après
+           quelques secondes, donc si on ne regarde pas l'écran au bon
+           moment on le rate. La cloche garde un historique persistant tant
+           qu'on ne l'a pas ouvert, pour ne jamais perdre un pointage. -->
+      <span style="position:relative;display:inline-block;margin-left:12px;">
+        <button class="secondaryBtn" id="notifBellBtn" title="Derniers pointages">🔔<span id="notifBadge" class="notifBadge" style="display:none;"></span></button>
+        <div id="notifDropdown" class="notifDropdown" style="display:none;">
+          <div class="notifDropdownTitle">Derniers pointages</div>
+          <div id="notifList" class="notifList"></div>
+        </div>
+      </span>
       <button class="secondaryBtn" id="logoutBtn" style="margin-left:12px;">Déconnexion</button>
     </div>
   </header>
@@ -305,6 +333,36 @@
   // volontaire de Lancine pour rester simple et fiable.
   let punchPollTimer = null;
   let punchPollSince = null;
+  // Historique persistant des derniers pointages (voir cloche dans
+  // l'en-tête) — contrairement au bandeau punchToast qui disparaît tout
+  // seul après quelques secondes, cette liste reste disponible tant qu'on
+  // ne l'a pas consultée, pour ne jamais "rater" un pointage (retour de
+  // Lancine du 29/08/2026 : "la notification ne m'a rien donné", le
+  // bandeau avait probablement déjà disparu avant qu'il ne regarde l'écran).
+  let punchLog = [];
+  let punchUnreadCount = 0;
+
+  function updateNotifBadge() {
+    const badge = $('notifBadge');
+    if (punchUnreadCount > 0) {
+      badge.textContent = punchUnreadCount > 9 ? '9+' : String(punchUnreadCount);
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  function renderNotifList() {
+    const list = $('notifList');
+    if (!punchLog.length) {
+      list.innerHTML = '<div class="notifEmpty">Aucun pointage récent.</div>';
+      return;
+    }
+    list.innerHTML = punchLog.map((evt) => `<div class="notifItem">
+        <div class="niName">${escapeHtml(evt.firstName)} ${escapeHtml(evt.lastName)} (${escapeHtml(evt.matricule)})</div>
+        <div class="niDetail">${escapeHtml(evt.department)} — ${escapeHtml(evt.action)} · ${fmtTime(evt.at)}</div>
+      </div>`).join('');
+  }
 
   function playPunchSound() {
     try {
@@ -334,10 +392,17 @@
     const container = $('punchToastContainer');
     const div = document.createElement('div');
     div.className = 'punchToast';
-    div.innerHTML = `<div class="ptName">${escapeHtml(evt.firstName)} ${escapeHtml(evt.lastName)} (${escapeHtml(evt.matricule)})</div>
+    div.innerHTML = `<span class="ptClose">✕</span>
+      <div class="ptName">${escapeHtml(evt.firstName)} ${escapeHtml(evt.lastName)} (${escapeHtml(evt.matricule)})</div>
       <div class="ptDetail">${escapeHtml(evt.department)} — ${escapeHtml(evt.action)}</div>`;
+    // 20s (au lieu de 8s) + fermeture au clic : Lancine a signalé ne rien
+    // voir arriver — le bandeau disparaissait probablement avant qu'il ne
+    // regarde l'écran. Le laisser plus longtemps réduit le risque de le
+    // rater ; la cloche (voir punchLog) garde de toute façon une trace même
+    // si celui-ci disparaît sans avoir été vu.
+    div.addEventListener('click', () => div.remove());
     container.appendChild(div);
-    setTimeout(() => div.remove(), 8000);
+    setTimeout(() => div.remove(), 20000);
   }
 
   async function pollPunches() {
@@ -347,6 +412,13 @@
       if (data.events && data.events.length) {
         data.events.forEach(showPunchToast);
         playPunchSound();
+        // Historique persistant (cloche) : les plus récents en premier,
+        // limité à 30 entrées pour ne pas grossir indéfiniment sur une
+        // session laissée ouverte toute la journée.
+        punchLog = data.events.slice().reverse().concat(punchLog).slice(0, 30);
+        punchUnreadCount += data.events.length;
+        updateNotifBadge();
+        if ($('notifDropdown').style.display !== 'none') renderNotifList();
         // Rafraîchit le tableau des pointages s'il est actuellement affiché
         // (pas la peine sinon — loadEntries() sera de toute façon appelé au
         // prochain clic sur l'onglet Pointages).
@@ -383,6 +455,27 @@
     clearInterval(punchPollTimer);
     punchPollTimer = null;
   }
+
+  $('notifBellBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dropdown = $('notifDropdown');
+    const isOpen = dropdown.style.display !== 'none';
+    if (isOpen) {
+      dropdown.style.display = 'none';
+    } else {
+      renderNotifList();
+      dropdown.style.display = 'block';
+      punchUnreadCount = 0;
+      updateNotifBadge();
+    }
+  });
+  // Ferme le menu déroulant si on clique ailleurs sur la page.
+  document.addEventListener('click', (e) => {
+    const dropdown = $('notifDropdown');
+    if (dropdown.style.display !== 'none' && !dropdown.contains(e.target) && e.target !== $('notifBellBtn')) {
+      dropdown.style.display = 'none';
+    }
+  });
 
   // ---------- Auth ----------
   async function trySession() {
@@ -433,6 +526,13 @@
     token = null;
     localStorage.removeItem(AUTH_KEY);
     stopPunchPolling();
+    // Efface l'historique des pointages affiché par la cloche : évite
+    // qu'un autre admin qui se connecte ensuite sur le même appareil voie
+    // les pointages consultés par la session précédente.
+    punchLog = [];
+    punchUnreadCount = 0;
+    updateNotifBadge();
+    $('notifDropdown').style.display = 'none';
     showLogin();
   });
 
