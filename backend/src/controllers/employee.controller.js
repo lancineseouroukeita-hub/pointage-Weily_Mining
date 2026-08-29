@@ -88,7 +88,8 @@ function stripCombiningMarks(str) {
 function normalizeHeader(s) {
   return stripCombiningMarks(String(s || '').normalize('NFD'))
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
 }
 
 const COLUMN_ALIASES = {
@@ -97,7 +98,42 @@ const COLUMN_ALIASES = {
   prenom: 'firstName',
   departement: 'department',
   section: 'section',
+  // Alternative : une seule colonne "nom + prénom" au lieu de deux colonnes
+  // séparées — cas réel du fichier RH de Lancine du 29/08/2026 ("Prénom et
+  // Nom"). Voir splitFullName ci-dessous pour comment c'est éclaté en
+  // firstName/lastName.
+  'prenom et nom': 'fullName',
+  'prenom nom': 'fullName',
+  'nom et prenom': 'fullName',
+  'nom prenom': 'fullName',
+  'nom complet': 'fullName',
+  'nom & prenom': 'fullName',
 };
+
+// Éclate une colonne "Prénom et Nom" en firstName/lastName — le premier mot
+// devient le prénom, le reste le nom (cohérent avec l'ordre annoncé par
+// l'en-tête de colonne elle-même). Le fichier réel de Lancine n'est PAS
+// homogène (certaines lignes semblent "Prénom Nom", d'autres "NOM Prénom" en
+// majuscules) : plutôt que de deviner ligne par ligne un ordre indécidable
+// sans plus d'info, on applique une règle simple et constante. Peu importe,
+// pour l'affichage ("firstName + ' ' + lastName" partout dans l'app) et le
+// tri (par lastName), le résultat reste correct visuellement — seul le
+// champ précis qui "porte" le prénom vs le nom peut ne pas correspondre à la
+// réalité pour ces lignes-là.
+function splitFullName(fullName) {
+  const trimmed = String(fullName || '').trim().replace(/\s+/g, ' ');
+  const spaceIndex = trimmed.indexOf(' ');
+  if (spaceIndex === -1) {
+    // Un seul mot (espace manquant dans la saisie d'origine) : on le met
+    // dans les deux champs pour que l'affichage reste correct et qu'aucun
+    // des deux champs obligatoires ne soit vide.
+    return { firstName: trimmed, lastName: trimmed };
+  }
+  return {
+    firstName: trimmed.slice(0, spaceIndex).trim(),
+    lastName: trimmed.slice(spaceIndex + 1).trim(),
+  };
+}
 
 // GET /api/employees/import-template — génère un fichier Excel vierge (juste
 // les en-têtes + une ligne d'exemple) pour que Lancine sache exactement quoi
@@ -152,25 +188,51 @@ async function importEmployees(req, res) {
     const field = COLUMN_ALIASES[normalizeHeader(cell.value)];
     if (field) columnByField[field] = colNumber;
   });
-  const missingColumns = ['matricule', 'lastName', 'firstName', 'department', 'section'].filter((f) => !columnByField[f]);
+
+  // Deux formats de nom acceptés : colonnes séparées Nom+Prénom (le modèle
+  // téléchargeable), OU une seule colonne "Prénom et Nom"/"Nom complet"
+  // (cas réel du fichier RH de Lancine, voir splitFullName ci-dessus). Si
+  // les deux sont présentes, les colonnes séparées ont priorité.
+  const hasSeparateNames = Boolean(columnByField.lastName && columnByField.firstName);
+  const hasFullName = Boolean(columnByField.fullName);
+  if (!hasSeparateNames && !hasFullName) {
+    return res.status(400).json({
+      error: 'Colonne(s) de nom manquante(s) : soit "Nom" + "Prénom" séparément, soit une seule colonne "Prénom et Nom" (télécharge le modèle si besoin).',
+    });
+  }
+  const missingColumns = ['matricule', 'department', 'section'].filter((f) => !columnByField[f]);
   if (missingColumns.length) {
     return res.status(400).json({
-      error: 'Colonnes manquantes dans le fichier : Matricule, Nom, Prénom, Département, Section sont toutes requises (télécharge le modèle si besoin).',
+      error: 'Colonnes manquantes dans le fichier : Matricule, Département et Section sont toutes requises (télécharge le modèle si besoin).',
     });
   }
 
   let created = 0;
   let updated = 0;
   const errors = [];
+  const warnings = [];
+  // Détecte les matricules qui apparaissent plusieurs fois DANS CE MÊME
+  // FICHIER (vu sur le fichier réel de Lancine du 29/08/2026 : la même
+  // personne parfois listée deux fois avec l'orthographe/l'ordre du nom
+  // différent) — pas bloquant (upsert : la dernière ligne l'emporte), mais
+  // Lancine doit pouvoir s'en apercevoir pour nettoyer sa liste source.
+  const seenAtRow = new Map();
 
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
     const get = (field) => row.getCell(columnByField[field]).value;
     const matricule = String(get('matricule') ?? '').trim();
-    const lastName = String(get('lastName') ?? '').trim();
-    const firstName = String(get('firstName') ?? '').trim();
     const department = String(get('department') ?? '').trim();
     const section = String(get('section') ?? '').trim();
+    let firstName;
+    let lastName;
+    if (hasSeparateNames) {
+      lastName = String(get('lastName') ?? '').trim();
+      firstName = String(get('firstName') ?? '').trim();
+    } else {
+      const fullName = String(get('fullName') ?? '').trim();
+      ({ firstName, lastName } = splitFullName(fullName));
+    }
 
     // Ligne complètement vide (fin de tableau, ligne blanche laissée dans le
     // fichier) : on l'ignore silencieusement, ce n'est pas une erreur.
@@ -180,6 +242,11 @@ async function importEmployees(req, res) {
       errors.push(`Ligne ${rowNumber} : matricule, nom, prénom, département et section sont tous requis.`);
       continue;
     }
+
+    if (seenAtRow.has(matricule)) {
+      warnings.push(`Matricule ${matricule} apparaît plusieurs fois dans le fichier (lignes ${seenAtRow.get(matricule)} et ${rowNumber}) — seule la dernière version a été gardée.`);
+    }
+    seenAtRow.set(matricule, rowNumber);
 
     try {
       const existing = await prisma.employee.findUnique({ where: { matricule } });
@@ -200,7 +267,7 @@ async function importEmployees(req, res) {
     }
   }
 
-  return res.json({ created, updated, errors });
+  return res.json({ created, updated, errors, warnings });
 }
 
 module.exports = { listEmployees, createEmployee, updateEmployee, importEmployees, downloadImportTemplate };

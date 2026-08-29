@@ -121,6 +121,7 @@
         </div>
         <div class="msg" id="importMsg"></div>
         <ul id="importErrors" style="display:none;color:var(--danger);font-size:12.5px;margin:6px 0 0;padding-left:18px;"></ul>
+        <ul id="importWarnings" style="display:none;color:#e2b93b;font-size:12.5px;margin:6px 0 0;padding-left:18px;"></ul>
       </div>
       <div class="panelCard">
         <h2>Tous les employés</h2>
@@ -368,8 +369,11 @@
   $('importBtn').addEventListener('click', async () => {
     const msg = $('importMsg');
     const errorsList = $('importErrors');
+    const warningsList = $('importWarnings');
     errorsList.style.display = 'none';
     errorsList.innerHTML = '';
+    warningsList.style.display = 'none';
+    warningsList.innerHTML = '';
     const file = $('importFileInput').files[0];
     if (!file) {
       msg.className = 'msg error';
@@ -398,6 +402,14 @@
           const li = document.createElement('li');
           li.textContent = e;
           errorsList.appendChild(li);
+        });
+      }
+      if (data.warnings && data.warnings.length) {
+        warningsList.style.display = 'block';
+        data.warnings.forEach((w) => {
+          const li = document.createElement('li');
+          li.textContent = w;
+          warningsList.appendChild(li);
         });
       }
       $('importFileInput').value = '';
