@@ -112,6 +112,17 @@
         <div class="msg" id="addEmployeeMsg"></div>
       </div>
       <div class="panelCard">
+        <h2>Importer une liste (Excel)</h2>
+        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Pour ajouter ou mettre à jour plusieurs employés d'un coup. Un matricule déjà existant est mis à jour (nom/prénom/département/section) ; les employés désactivés ne sont jamais réactivés automatiquement.</p>
+        <div class="formRow">
+          <button class="secondaryBtn" id="downloadTemplateBtn">⬇️ Télécharger le modèle</button>
+          <input type="file" id="importFileInput" accept=".xlsx">
+          <button class="primaryBtn" id="importBtn">⬆️ Importer</button>
+        </div>
+        <div class="msg" id="importMsg"></div>
+        <ul id="importErrors" style="display:none;color:var(--danger);font-size:12.5px;margin:6px 0 0;padding-left:18px;"></ul>
+      </div>
+      <div class="panelCard">
         <h2>Tous les employés</h2>
         <div class="tableWrap">
           <table>
@@ -321,6 +332,75 @@
     } catch (err) {
       msg.className = 'msg error';
       msg.textContent = err.message;
+    }
+  });
+
+  // ---------- Import Excel ----------
+  $('downloadTemplateBtn').addEventListener('click', async () => {
+    const msg = $('importMsg');
+    msg.className = 'msg'; msg.textContent = '';
+    try {
+      const res = await fetch('/api/employees/import-template', {
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      if (!res.ok) throw new Error('Erreur HTTP ' + res.status);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'modele_import_employes.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      msg.className = 'msg error';
+      msg.textContent = err.message;
+    }
+  });
+
+  $('importBtn').addEventListener('click', async () => {
+    const msg = $('importMsg');
+    const errorsList = $('importErrors');
+    errorsList.style.display = 'none';
+    errorsList.innerHTML = '';
+    const file = $('importFileInput').files[0];
+    if (!file) {
+      msg.className = 'msg error';
+      msg.textContent = 'Choisis un fichier Excel (.xlsx) à importer.';
+      return;
+    }
+    msg.className = 'msg'; msg.textContent = 'Import en cours…';
+    $('importBtn').disabled = true;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      // Pas de Content-Type ici : le navigateur le fixe lui-même avec la
+      // "boundary" multipart correcte — le fixer à la main casserait l'envoi.
+      const res = await fetch('/api/employees/import', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+        body: formData,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((data && data.error) || ('Erreur HTTP ' + res.status));
+      msg.className = 'msg success';
+      msg.textContent = `${data.created} ajouté(s), ${data.updated} mis à jour.`;
+      if (data.errors && data.errors.length) {
+        errorsList.style.display = 'block';
+        data.errors.forEach((e) => {
+          const li = document.createElement('li');
+          li.textContent = e;
+          errorsList.appendChild(li);
+        });
+      }
+      $('importFileInput').value = '';
+      loadEmployees();
+    } catch (err) {
+      msg.className = 'msg error';
+      msg.textContent = err.message;
+    } finally {
+      $('importBtn').disabled = false;
     }
   });
 
