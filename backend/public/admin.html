@@ -153,6 +153,7 @@
     <button class="navBtn" data-tab="pointer">Pointage</button>
     <button class="navBtn active" data-tab="employees">Employés</button>
     <button class="navBtn" data-tab="entries">Pointages</button>
+    <button class="navBtn" data-tab="machine">Machine</button>
     <button class="navBtn" data-tab="export">Export Excel</button>
     <button class="navBtn" data-tab="settings">Réglages</button>
   </nav>
@@ -268,7 +269,7 @@
       <div class="panelCard">
         <div class="tableWrap">
           <table>
-            <thead><tr><th>Date</th><th>Matricule</th><th>Nom</th><th>Département</th><th>Section</th><th>Arrivée</th><th>Début pause</th><th>Fin pause</th><th>Départ</th><th>Heures travaillées</th><th>Heures sup (jour)</th><th>HN (22h-6h)</th></tr></thead>
+            <thead><tr><th>Date</th><th>Matricule</th><th>Nom</th><th>Département</th><th>Section</th><th>Arrivée</th><th>Début pause</th><th>Fin pause</th><th>Départ</th><th>Heures travaillées</th><th>Heures sup (jour)</th><th>HN (22h-6h)</th><th>Source</th></tr></thead>
             <tbody id="entriesTbody"></tbody>
           </table>
         </div>
@@ -303,6 +304,43 @@
         <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Utilise la période Du/Au/Département choisie ci-dessus : télécharge le fichier Excel correspondant, PUIS supprime définitivement ces pointages de la base — pour repartir d'un tableau vide chaque semaine. Une date de début ET de fin sont obligatoires. Action irréversible : garde bien le fichier téléchargé.</p>
         <button class="secondaryBtn" id="archiveBtn" style="border-color:var(--danger);color:var(--danger);">🗄️ Archiver et vider cette période</button>
         <div class="msg" id="archiveMsg"></div>
+      </div>
+    </div>
+
+    <!-- Onglet Machine : pointeuse à empreinte (demande de Lancine du
+         29/09/2026) — import du fichier de la machine et envoi direct
+         ADMS/iClock. Voir src/controllers/machine.controller.js. -->
+    <div class="tabPanel" id="tab-machine">
+      <div class="panelCard">
+        <h2>Règle à respecter sur la machine</h2>
+        <p style="color:var(--muted);font-size:13px;margin:-6px 0 0;line-height:1.5;">Quand vous enregistrez l'empreinte d'un travailleur dans la machine, donnez-lui comme <b>numéro (ID / N° / PIN)</b> exactement son <b>matricule</b> de l'onglet Employés (les zéros devant sont ignorés : 0147 = 147). Chaque passage de doigt est ensuite rangé dans l'ordre de la carte de pointage : 1er = arrivée, 2e = début de pause, 3e = fin de pause, dernier = départ. Avec seulement 2 passages dans la journée : arrivée et départ. Un poste de nuit (ex : 22h → 6h) compte pour le jour d'arrivée.</p>
+      </div>
+      <div class="panelCard">
+        <h2>1. Importer le fichier de la machine</h2>
+        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">Fonctionne avec toutes les marques : exportez les pointages sur clé USB (souvent un fichier <b>…attlog.dat</b> ou <b>.txt</b>) ou depuis le logiciel de la machine (<b>.csv</b> ou <b>.xlsx</b>). Cliquez d'abord sur « Analyser » : rien n'est enregistré tant que vous ne confirmez pas. Réimporter le même fichier ne crée pas de doublon. Une journée déjà pointée à l'écran n'est jamais écrasée, seules ses cases vides sont complétées.</p>
+        <div class="formRow">
+          <input type="file" id="machineFileInput" accept=".dat,.txt,.csv,.xlsx,.log">
+          <button class="secondaryBtn" id="machinePreviewBtn">🔍 Analyser</button>
+          <button class="primaryBtn" id="machineImportBtn" style="display:none;">⬆️ Confirmer l'import</button>
+        </div>
+        <div class="msg" id="machineMsg"></div>
+        <div id="machineReport" style="display:none;font-size:13px;line-height:1.6;margin-top:10px;"></div>
+      </div>
+      <div class="panelCard">
+        <h2>2. Envoi automatique par la machine (option)</h2>
+        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;line-height:1.5;">Si la machine a un menu <b>ADMS</b>, <b>Cloud Server</b> ou <b>iClock</b> (ZKTeco et beaucoup de marques compatibles), elle peut envoyer chaque pointage toute seule, sans clé USB. Il lui faut une connexion internet (câble, Wi-Fi ou 4G). Réglages dans la machine : adresse du serveur <b id="machineServerHost">—</b>, port <b>443</b>, HTTPS activé. Ajoutez ensuite le numéro de série de la machine (menu Système → Infos) dans Render, variable <b>MACHINE_SERIALS</b> (plusieurs machines : séparez par des virgules). Sans ce réglage, l'envoi automatique reste bloqué par sécurité.</p>
+        <div id="machineStatus" style="font-size:13px;line-height:1.6;">Chargement…</div>
+        <button class="secondaryBtn" id="machineRefreshBtn" style="margin-top:10px;">🔄 Actualiser</button>
+      </div>
+      <div class="panelCard">
+        <h2>Recalculer les journées</h2>
+        <p style="color:var(--muted);font-size:12.5px;margin:-8px 0 14px;">À utiliser après avoir ajouté un employé dont le numéro était inconnu au moment où il a pointé sur la machine.</p>
+        <div class="formRow">
+          <div class="formField"><label>Du</label><input id="machineReFrom" type="date"></div>
+          <div class="formField"><label>Au</label><input id="machineReTo" type="date"></div>
+          <button class="secondaryBtn" id="machineReapplyBtn">♻️ Recalculer</button>
+        </div>
+        <div class="msg" id="machineReMsg"></div>
       </div>
     </div>
 
@@ -645,6 +683,7 @@
       btn.classList.add('active');
       $('tab-' + btn.dataset.tab).classList.add('show');
       if (btn.dataset.tab === 'entries') loadEntries();
+      if (btn.dataset.tab === 'machine') loadMachineStatus();
       if (btn.dataset.tab === 'pointer') $('ptrMatriculeInput').focus();
     });
   });
@@ -970,6 +1009,98 @@
     }
   });
 
+  // ---------- Machine à empreinte ----------
+  // Voir src/controllers/machine.controller.js : « Analyser » envoie le
+  // fichier SANS ?commit=1 (aperçu, rien n'est enregistré), « Confirmer »
+  // renvoie le même fichier avec ?commit=1.
+  function listHtml(title, items, color) {
+    if (!items || !items.length) return '';
+    return `<div style="margin-top:8px;color:${color};"><b>${escapeHtml(title)}</b><ul style="margin:4px 0 0;padding-left:18px;">${items.map((i) => `<li>${escapeHtml(String(i))}</li>`).join('')}</ul></div>`;
+  }
+  async function sendMachineFile(commit) {
+    const file = $('machineFileInput').files[0];
+    const msg = $('machineMsg');
+    const report = $('machineReport');
+    if (!file) { msg.className = 'msg error'; msg.textContent = 'Choisissez d\'abord le fichier exporté par la machine.'; return; }
+    msg.className = 'msg'; msg.textContent = commit ? 'Import en cours… (peut prendre une minute pour un mois complet)' : 'Analyse en cours…';
+    $('machinePreviewBtn').disabled = true; $('machineImportBtn').disabled = true;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/machine/import' + (commit ? '?commit=1' : ''), {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: formData,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const extra = data && data.ignoredSamples && data.ignoredSamples.length ? ' Exemples de lignes non comprises : ' + data.ignoredSamples.join(' ; ') : '';
+        throw new Error(((data && data.error) || ('Erreur HTTP ' + res.status)) + extra);
+      }
+      const d = data.distribution || {};
+      let html = `<div><b>${data.punches}</b> passages de doigt reconnus, du ${fmtDate(data.from)} au ${fmtDate(data.to)}` +
+        (data.ignored ? ` · ${data.ignored} ligne(s) ignorée(s)` : '') + `</div>` +
+        `<div><b>${data.employeesFound}</b> employé(s) reconnu(s) · <b>${data.days}</b> journée(s) : ${d.quatre || 0} avec 4 pointages, ${d.deux || 0} avec 2, ${(d.un || 0) + (d.trois || 0)} incomplète(s), ${d.plus || 0} avec plus de 4</div>`;
+      if (data.unknownCount) html += listHtml(`${data.unknownCount} numéro(s) de la machine sans employé correspondant (ajoutez-les dans Employés avec ce matricule, puis réimportez) :`, data.unknownPins, '#e2b93b');
+      if (data.ignoredSamples && data.ignoredSamples.length) html += listHtml('Exemples de lignes non comprises :', data.ignoredSamples, 'var(--muted)');
+      if (!data.preview) {
+        html = `<div style="color:var(--success);"><b>Import terminé :</b> ${data.inserted} nouveau(x) passage(s) enregistré(s) · ${data.created} journée(s) créée(s) · ${data.updated} mise(s) à jour · ${data.completed} complétée(s)</div>` + html;
+        html += listHtml('Journées à vérifier :', data.anomalies, '#e2b93b');
+        html += listHtml('Différences avec l\'écran de pointage :', data.conflicts, 'var(--danger)');
+      }
+      report.innerHTML = html;
+      report.style.display = 'block';
+      msg.className = 'msg' + (data.preview ? '' : ' success');
+      msg.textContent = data.preview ? 'Aperçu uniquement : rien n\'est encore enregistré. Vérifiez puis cliquez sur « Confirmer l\'import ».' : 'Les journées sont visibles dans l\'onglet Pointages.';
+      $('machineImportBtn').style.display = data.preview ? '' : 'none';
+      if (!data.preview) { $('machineFileInput').value = ''; loadMachineStatus(); }
+    } catch (err) {
+      msg.className = 'msg error'; msg.textContent = err.message;
+      report.style.display = 'none';
+      $('machineImportBtn').style.display = 'none';
+    } finally {
+      $('machinePreviewBtn').disabled = false; $('machineImportBtn').disabled = false;
+    }
+  }
+  $('machinePreviewBtn').addEventListener('click', () => sendMachineFile(false));
+  $('machineImportBtn').addEventListener('click', () => sendMachineFile(true));
+  $('machineFileInput').addEventListener('change', () => {
+    $('machineImportBtn').style.display = 'none';
+    $('machineReport').style.display = 'none';
+    $('machineMsg').textContent = '';
+  });
+
+  async function loadMachineStatus() {
+    $('machineServerHost').textContent = location.host;
+    const box = $('machineStatus');
+    try {
+      const s = await api('/api/machine/status');
+      let html = `<div>Envoi automatique : ${s.admsEnabled ? '<b style="color:var(--success);">activé</b>' : '<b style="color:#e2b93b;">désactivé</b> (variable MACHINE_SERIALS absente dans Render)'}</div>`;
+      html += `<div>${s.total} passage(s) de doigt enregistré(s) au total.</div>`;
+      if (s.devices.length) {
+        html += '<div style="margin-top:6px;"><b>Dernières réceptions :</b><ul style="margin:4px 0 0;padding-left:18px;">' + s.devices.map((d) =>
+          `<li>${d.origin === 'adms' ? '📡 Machine ' : '📄 Fichier '}${escapeHtml(d.deviceSn || '')} — ${d.count} passage(s), dernier pointage le ${fmtDate(d.lastPunchAt)} à ${fmtTime(d.lastPunchAt)}</li>`).join('') + '</ul></div>';
+      }
+      html += listHtml('Numéros reçus ce mois-ci sans employé correspondant :', s.unknownPins, '#e2b93b');
+      box.innerHTML = html;
+    } catch (err) {
+      box.textContent = err.message;
+    }
+  }
+  $('machineRefreshBtn').addEventListener('click', loadMachineStatus);
+
+  $('machineReapplyBtn').addEventListener('click', async () => {
+    const msg = $('machineReMsg');
+    const from = $('machineReFrom').value, to = $('machineReTo').value;
+    if (!from || !to) { msg.className = 'msg error'; msg.textContent = 'Choisissez une date de début et de fin.'; return; }
+    msg.className = 'msg'; msg.textContent = 'Recalcul en cours…';
+    try {
+      const r = await api(`/api/machine/reapply?from=${from}&to=${to}`, { method: 'POST' });
+      msg.className = 'msg success';
+      msg.textContent = `${r.created} journée(s) créée(s), ${r.updated} mise(s) à jour, ${r.completed} complétée(s).` + (r.unknownPins.length ? ` Toujours inconnus : ${r.unknownPins.join(', ')}.` : '');
+    } catch (err) {
+      msg.className = 'msg error'; msg.textContent = err.message;
+    }
+  });
+
   // ---------- Pointages ----------
   function entriesQuery() {
     const params = new URLSearchParams();
@@ -993,7 +1124,8 @@
         <td>${fmtTime(e.arrivalAt)}</td><td>${fmtTime(e.breakStartAt)}</td>
         <td>${fmtTime(e.breakEndAt)}</td><td>${fmtTime(e.departureAt)}</td>
         <td>${fmtHours(e.workedHours)}</td><td>${fmtHours(e.dailyOvertimeHours)}</td>
-        <td>${fmtHours(e.nightHours)}</td>`;
+        <td>${fmtHours(e.nightHours)}</td>
+        <td>${e.source === 'machine' ? '🖐️ Empreinte' : '⌨️ Écran'}</td>`;
       tbody.appendChild(tr);
     });
 

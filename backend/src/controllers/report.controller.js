@@ -1,6 +1,6 @@
 const ExcelJS = require('exceljs');
 const prisma = require('../config/prisma');
-const { dateOnly, workedHours, dailyOvertimeHours, nightHours, weekStart, weekEnd, fmtHours } = require('../utils/workday');
+const { todayDateOnly, dateOnly, workedHours, dailyOvertimeHours, nightHours, weekStart, weekEnd, fmtHours } = require('../utils/workday');
 
 // Construit la clause "where" commune à la consultation (listEntries) ET à
 // l'export Excel (exportEntries) — évite que les deux finissent par
@@ -51,6 +51,7 @@ async function listEntries(req, res) {
         workedHours: hours,
         dailyOvertimeHours: dailyOvertimeHours(hours),
         nightHours: nightHours(e),
+        source: e.source,
       };
     }),
     weeklySummary,
@@ -177,6 +178,7 @@ async function exportEntries(req, res) {
     { header: 'Heures travaillées', key: 'worked', width: 16 },
     { header: 'Heures sup (jour, >8h)', key: 'overtimeDay', width: 20 },
     { header: 'Heures de nuit (22h-6h)', key: 'nightHours', width: 20 },
+    { header: 'Source', key: 'source', width: 12 },
   ];
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
@@ -197,6 +199,7 @@ async function exportEntries(req, res) {
       worked: fmtHours(hours),
       overtimeDay: fmtHours(dailyOvertimeHours(hours)),
       nightHours: fmtHours(nightHours(e)),
+      source: e.source === 'machine' ? 'Empreinte' : 'Écran',
     });
   });
 
@@ -254,6 +257,15 @@ async function archiveAndClearEntries(req, res) {
   }
   const where = buildWhere({ from, to, department });
   const result = await prisma.timeEntry.deleteMany({ where });
+  // Empreintes brutes de la même période (voir machine.controller.js) : sans
+  // ça, un recalcul ultérieur recréerait les journées archivées. Seulement
+  // quand TOUS les départements sont archivés — les empreintes ne sont pas
+  // rattachées à un département.
+  if (!department) {
+    const toExclusive = dateOnly(to);
+    toExclusive.setDate(toExclusive.getDate() + 1);
+    await prisma.machinePunch.deleteMany({ where: { punchedAt: { gte: dateOnly(from), lt: toExclusive } } });
+  }
   return res.json({ deletedCount: result.count });
 }
 
@@ -295,13 +307,24 @@ function guessLastAction(entry) {
 // `serverNow` : le client doit s'en servir comme prochain `since` plutôt que
 // sa propre horloge, pour éviter tout souci de décalage horloge client/
 // serveur qui ferait rater ou dupliquer des évènements.
+function yesterdayDateOnly() {
+  const d = todayDateOnly();
+  d.setDate(d.getDate() - 1);
+  return d;
+}
+
 async function latestEntries(req, res) {
   const { since } = req.query;
   const sinceDate = since ? new Date(since) : new Date(Date.now() - 60000);
   const entries = await prisma.timeEntry.findMany({
-    where: { updatedAt: { gt: sinceDate } },
+    // Seulement les journées d'hier/aujourd'hui : un import de fichier de la
+    // pointeuse (voir machine.controller.js) peut créer des centaines de
+    // journées passées d'un coup — ce ne sont pas des « nouveaux pointages »
+    // à annoncer un par un.
+    where: { updatedAt: { gt: sinceDate }, date: { gte: yesterdayDateOnly() } },
     include: { employee: true },
     orderBy: { updatedAt: 'asc' },
+    take: 200,
   });
   return res.json({
     serverNow: new Date().toISOString(),
@@ -313,6 +336,7 @@ async function latestEntries(req, res) {
       department: e.employee.department,
       section: e.employee.section,
       action: guessLastAction(e),
+      source: e.source,
       at: e.updatedAt,
     })),
   });

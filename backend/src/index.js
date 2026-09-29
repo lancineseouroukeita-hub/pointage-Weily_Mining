@@ -8,6 +8,7 @@ const employeeRoutes = require('./routes/employee.routes');
 const pointageRoutes = require('./routes/pointage.routes');
 const reportRoutes = require('./routes/report.routes');
 const settingsRoutes = require('./routes/settings.routes');
+const machineRoutes = require('./routes/machine.routes');
 
 const app = express();
 // Nécessaire derrière le proxy inverse de Render pour que req.ip renvoie la
@@ -27,6 +28,10 @@ app.use('/api/employees', employeeRoutes);
 app.use('/api/pointage', pointageRoutes);
 app.use('/api/report', reportRoutes);
 app.use('/api/settings', settingsRoutes);
+// Pointeuse à empreinte : import de fichier (admin) + envoi direct par la
+// machine (ADMS/iClock, adresses /iclock/... imposées par ce protocole).
+app.use('/api/machine', machineRoutes.adminRouter);
+app.use('/iclock', machineRoutes.iclockRouter);
 
 // Sert l'application web (écran de pointage + espace admin) — même principe
 // que seourouApps : tout sur la même origine, pas de serveur séparé à lancer.

@@ -79,9 +79,39 @@ model TimeEntry {
   breakStartAt  DateTime?
   breakEndAt    DateTime?
   departureAt   DateTime?
+  // Origine du pointage : "kiosque" (écran de pointage / espace admin, par
+  // matricule) ou "machine" (pointeuse à empreinte, voir
+  // machine.controller.js). Une journée "machine" est entièrement
+  // recalculée à partir des empreintes brutes (MachinePunch) à chaque
+  // nouveau pointage reçu ; une journée "kiosque" n'est jamais écrasée par
+  // la machine, seules ses étapes encore vides sont complétées.
+  source        String    @default("kiosque")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@unique([employeeId, date])
   @@index([date])
+}
+
+// Un passage de doigt brut sur la pointeuse à empreinte (demande de Lancine
+// du 29/09/2026), reçu par import de fichier ou envoyé directement par la
+// machine (protocole ADMS/iClock, voir machine.controller.js). Conservé tel
+// quel pour pouvoir recalculer les journées (TimeEntry) à tout moment et
+// garder une trace de ce que la machine a réellement enregistré.
+model MachinePunch {
+  id        String   @id @default(uuid())
+  // Numéro de l'employé DANS LA MACHINE, tel que reçu (ex: "0147").
+  pin       String
+  // Même numéro sans zéros de tête ("147") : c'est lui qui est comparé au
+  // matricule de l'employé (voir pinKey dans machine.controller.js).
+  pinKey    String
+  punchedAt DateTime
+  // "fichier" (import manuel) ou "adms" (envoi direct de la machine).
+  origin    String
+  // Numéro de série de la machine (envoi direct) ou nom du fichier importé.
+  deviceSn  String?
+  createdAt DateTime @default(now())
+
+  @@unique([pinKey, punchedAt])
+  @@index([punchedAt])
 }
